@@ -98,10 +98,19 @@ impl Builder<'_> {
     }
     fn matvec(&mut self, name: &str, input: usize, rows: usize, columns: usize) -> Result<usize> {
         let weights = self.weight(name)?;
+        Ok(self.matvec_buffer(weights, input, rows, columns))
+    }
+    fn matvec_buffer(
+        &mut self,
+        weights: usize,
+        input: usize,
+        rows: usize,
+        columns: usize,
+    ) -> usize {
         let output = self.empty("resident matrix result", rows);
         let shape = self.uniform(&[rows as u32, columns as u32, 0, 0]);
         self.dispatch(true, &[weights, input, output, shape], rows as u32);
-        Ok(output)
+        output
     }
     fn operator(
         &mut self,
@@ -244,7 +253,9 @@ impl ResidentGraph {
         ] {
             x = b.gru(name, x, width, hidden)?;
         }
-        let logits = b.matvec("noise_denoise_filter_1_weights", x, GAINS, 1024)?;
+        let projection = crate::network::projection_weights(model)?;
+        let weights = b.data("output projection in execution order", &projection, true);
+        let logits = b.matvec_buffer(weights, x, GAINS, 1024);
         let bias = b.weight("noise_denoise_filter_1_bias")?;
         let output = b.operator(
             [5, GAINS as u32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],

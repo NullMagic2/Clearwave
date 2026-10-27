@@ -209,12 +209,12 @@ impl Desktop {
         };
         if let Some(bundle) = bundle {
             app.preferences.active.bundle = bundle.to_string_lossy().into_owned();
-        } else if app.preferences.active.bundle.is_empty() {
-            if let Ok(runtime) = crate::controls::runtime_directory() {
-                let path = runtime.join("vendor");
-                if path.is_dir() {
-                    app.preferences.active.bundle = path.to_string_lossy().into_owned();
-                }
+        } else if app.preferences.active.bundle.is_empty()
+            && let Ok(runtime) = crate::controls::runtime_directory()
+        {
+            let path = runtime.join("vendor");
+            if path.is_dir() {
+                app.preferences.active.bundle = path.to_string_lossy().into_owned();
             }
         }
         app.refresh();
@@ -359,12 +359,11 @@ impl Desktop {
                     sources.retain(|n| {
                         !n.name.starts_with("clearwave.") && !n.name.starts_with("voice-amd.")
                     });
-                    if self.preferences.active.source.is_empty() {
-                        if let Some(source) =
+                    if self.preferences.active.source.is_empty()
+                        && let Some(source) =
                             sources.iter().find(|n| !n.virtual_node).or(sources.first())
-                        {
-                            self.preferences.active.source = source.name.clone();
-                        }
+                    {
+                        self.preferences.active.source = source.name.clone();
                     }
                     self.sources = sources;
                     self.revision += 1;
@@ -961,12 +960,11 @@ impl Interface {
             if let Some(state) = weak.upgrade() {
                 let mut state = state.borrow_mut();
                 state.preferences.active.strength = (scale.value() / 100.0) as f32;
-                if let Some(live) = &state.live {
-                    if let Err(e) =
+                if let Some(live) = &state.live
+                    && let Err(e) =
                         StrengthControl::write(&live.control, state.preferences.active.strength)
-                    {
-                        state.message = Some((true, e.to_string()));
-                    }
+                {
+                    state.message = Some((true, e.to_string()));
                 }
                 state.changed();
             }

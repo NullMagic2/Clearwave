@@ -25,7 +25,7 @@ impl Fft {
     pub fn new(len: usize) -> Result<Self> {
         let mut remaining = len;
         for factor in [2, 3, 5] {
-            while remaining > 1 && remaining % factor == 0 {
+            while remaining > 1 && remaining.is_multiple_of(factor) {
                 remaining /= factor;
             }
         }
@@ -73,9 +73,9 @@ impl Fft {
             output[0] = input[0];
             return;
         }
-        let radix = if n % 2 == 0 {
+        let radix = if n.is_multiple_of(2) {
             2
-        } else if n % 3 == 0 {
+        } else if n.is_multiple_of(3) {
             3
         } else {
             5

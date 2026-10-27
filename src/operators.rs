@@ -18,7 +18,7 @@ impl ConvShape {
             || self.output_channels == 0
             || self.kernel_height == 0
             || self.kernel_width == 0
-            || self.kernel_width % 2 == 0
+            || self.kernel_width.is_multiple_of(2)
         {
             return Err(Error::new("Invalid convolution shape"));
         }
@@ -76,7 +76,7 @@ pub fn convolution(
 pub fn normalize(input: &[f32], parameters: &[f32], channels: usize) -> Result<Vec<f32>> {
     if channels == 0
         || input.is_empty()
-        || input.len() % channels != 0
+        || !input.len().is_multiple_of(channels)
         || parameters.len() != channels * 4
         || parameters[3 * channels..]
             .iter()
@@ -96,6 +96,19 @@ pub fn normalize(input: &[f32], parameters: &[f32], channels: usize) -> Result<V
                 + f64::from(parameters[channels + c])) as f32
         })
         .collect())
+}
+/// Convert a stored row-major matrix to its row-major transpose.
+pub fn transpose_matrix(values: &[f32], rows: usize, columns: usize) -> Result<Vec<f32>> {
+    if rows == 0 || columns == 0 || rows.checked_mul(columns) != Some(values.len()) {
+        return Err(Error::new("Matrix transpose size mismatch"));
+    }
+    let mut output = vec![0.0; values.len()];
+    for row in 0..rows {
+        for column in 0..columns {
+            output[column * rows + row] = values[row * columns + column];
+        }
+    }
+    Ok(output)
 }
 pub fn matvec(weights: &[f32], input: &[f32], rows: usize) -> Result<Vec<f32>> {
     if rows == 0 || input.is_empty() || weights.len() != rows * input.len() {
@@ -151,6 +164,17 @@ pub fn gru_update(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn input_major_projection_preserves_output_columns() {
+        // Two input neurons, three output bins: y = x * W, not W * x.
+        let weights = transpose_matrix(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 2, 3).unwrap();
+        assert_eq!(
+            matvec(&weights, &[7.0, 11.0], 3).unwrap(),
+            [51.0, 69.0, 87.0]
+        );
+        assert!(transpose_matrix(&[1.0], 0, 1).is_err());
+        assert!(transpose_matrix(&[1.0], usize::MAX, 2).is_err());
+    }
     #[test]
     fn convolution_padding_and_channel_order() {
         let s = ConvShape {

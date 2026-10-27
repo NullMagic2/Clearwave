@@ -115,10 +115,37 @@ impl Processor {
                 "Expected 961 finite noise-mask values from 0 to 1",
             ));
         }
+        // Keep full suppression for the strongest predicted-noise bins. Ease
+        // weaker bins with the selected strength to retain quieter speech detail.
+        let top = (GAINS as f32 * 0.2 * strength) as usize;
+        let threshold = if top == 0 {
+            f32::MAX
+        } else if strength == 1.0 {
+            0.0
+        } else {
+            let mut power: Vec<f32> = spectrum[..GAINS]
+                .iter()
+                .zip(noise)
+                .map(|(value, mask)| value.power() * mask)
+                .collect();
+            *power.select_nth_unstable_by(GAINS - top, f32::total_cmp).1
+        };
+        let gains: Vec<f32> = spectrum[..GAINS]
+            .iter()
+            .zip(noise)
+            .map(|(value, mask)| {
+                let factor = if value.power() * mask >= threshold {
+                    1.0
+                } else {
+                    strength
+                };
+                1.0 - factor * mask
+            })
+            .collect();
         let mut spectrum = spectrum.to_vec();
         for (k, value) in spectrum.iter_mut().enumerate() {
             let bin = if k <= TRANSFORM / 2 { k } else { TRANSFORM - k };
-            let gain = 1.0 - strength * noise[bin];
+            let gain = gains[bin];
             value.re *= gain;
             value.im *= gain;
         }
@@ -460,13 +487,33 @@ mod tests {
         }
     }
     #[test]
+    fn intensity_retains_full_suppression_in_strong_noise_bins() {
+        let p = Processor::new().unwrap();
+        let spectrum: Vec<_> = (0..TRANSFORM)
+            .map(|k| {
+                let bin = if k <= TRANSFORM / 2 { k } else { TRANSFORM - k };
+                Complex {
+                    re: (bin + 1) as f32 / GAINS as f32,
+                    im: 0.0,
+                }
+            })
+            .collect();
+        let time = p.synthesize(&spectrum, &vec![0.8; GAINS], 0.5).unwrap();
+        assert!(time.iter().all(|v| v.im.abs() < 1e-6));
+        let actual = p.fft.transform(&time, false).unwrap();
+        for (bin, gain) in [(10, 0.6), (900, 0.2)] {
+            assert!((actual[bin].re - spectrum[bin].re * gain).abs() < 1e-5);
+            assert!((actual[TRANSFORM - bin].re - actual[bin].re).abs() < 1e-5);
+        }
+    }
+    #[test]
     fn noise_mask_inversion_strength_and_invalid_predictions() {
         let p = Processor::new().unwrap();
         let samples = vec![0.1; 500];
         let muted = p.process(&samples, 1.0, |_| Ok(vec![1.0; GAINS])).unwrap();
         assert!(muted.iter().all(|v| *v == 0.0));
-        let half = p.process(&samples, 0.5, |_| Ok(vec![1.0; GAINS])).unwrap();
-        assert!(half.iter().all(|v| (v - 0.05).abs() < 1e-6));
+        let bypass = p.process(&samples, 0.0, |_| Ok(vec![1.0; GAINS])).unwrap();
+        assert!(bypass.iter().all(|v| (v - 0.1).abs() < 1e-6));
         assert!(
             p.process(&samples, 1.0, |_| Ok(vec![f32::NAN; GAINS]))
                 .is_err()

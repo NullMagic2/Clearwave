@@ -195,3 +195,38 @@ license, and 140 Rust dependency notices. Checksums, root ownership, and exclusi
 of NVIDIA files and the development style guide were verified. This release
 changes controls and naming; it does not claim a fix for physical-input static or
 validated speech-denoising quality. No private microphone captures are included.
+
+## Output projection correction — 0.6.6 experimental
+
+The final projection was read with incorrect matrix strides through 0.6.5.
+Correcting its input-major stored layout preserves the original/exported weights
+and fixes CPU setup and persistent Vulkan upload. The new non-square projection
+regression passes; all 32 Rust tests pass. The 28 operator checks also pass.
+A 352,786-sample stream agrees with offline output exactly; the 4,807-sample
+CPU/AMD fixture differs by at most 5.960464477539063e-8.
+
+On generated clean speech, reference-projected voice attenuation improves from
+7.38 dB to 0.13 dB. Two natural clean speech references improve from 6.99–7.39 dB
+to 0.07–0.32 dB. With static, hum, and clicks at about 10 dB input SNR, corrected
+SI-SDR is 15.97–17.29 dB, while the old interpretation produces 4.89–6.91 dB.
+These are specific reference comparisons, without added post-processing gain.
+Remaining muffling and static in a local sample are unresolved; the correction
+is experimental and does not establish vendor output equivalence.
+
+See `OUTPUT_PROJECTION.md`, `projection-quality-check.json`,
+`natural-speech-check.json`, and `corrected-stream-check.json`. All comparison
+recordings remain outside source and binary releases. Implementation estimates
+are provisional, with unsettled core behavior excluded from completion credit.
+
+The conditional lower-intensity rule now keeps full suppression in the strongest
+predicted-noise bins while easing quieter bins. A dedicated spectral regression
+checks both behaviors and conjugate symmetry. Full-strength behavior is unchanged.
+
+The final release build also passes formatting and Clippy with warnings denied
+on all targets (Rust/Clippy 1.93.1). Mechanical let-chain and divisibility cleanup
+keeps the declared Rust 1.88 minimum. All 32 unit tests pass after that cleanup.
+A fresh CLI live-routing check sends generated speech through AMD Vulkan and
+captures 192,000 finite, nonzero output samples. SIGTERM removes the owned
+virtual nodes; parsed default-device metadata is unchanged after cleanup.
+See `live-routing-0.6.6.json`. This exercises the final executable's routing,
+not a new physical microphone recording or a native GUI quality evaluation.

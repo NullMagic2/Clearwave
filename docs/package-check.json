@@ -1,17 +1,17 @@
 {
   "application": "Clearwave",
-  "version": "0.6.5",
+  "version": "0.6.6",
   "architecture": "amd64",
   "maximum_glibc_symbol": "2.39",
-  "binary_sha256": "8971627b946b52e2967b6920662a73680010542a87dc6d59af709455144b2989",
+  "binary_sha256": "5f2e5bddeebcb3b8b4aabf681071c570031692dd7484f76455265211afee6df8",
   "application_license": "MIT",
   "rust_unit_tests": {
-    "passed": 30,
+    "passed": 32,
     "failed": 0
   },
   "interface_validation": "docs/simple-ui-check.json",
   "folder_picker_validation": "docs/folder-picker-check.json",
-  "installed_gui_checks": {
+  "prior_0_6_5_installed_gui_checks": {
     "ubuntu24.04": {
       "native_window": true,
       "installed_path": "/usr/bin/true (isolated test mount of packaged ELF)",
@@ -33,7 +33,7 @@
     "default_metadata_unchanged": true
   },
   "packages": {
-    "clearwave_0.6.5-1+debian13_amd64.deb": {
+    "clearwave_0.6.6-1+debian13_amd64.deb": {
       "sha256_verified": true,
       "same_compatible_executable": true,
       "nvidia_files_absent": true,
@@ -42,7 +42,7 @@
       "root_archive_ownership": true,
       "rust_dependency_notices": 140
     },
-    "clearwave_0.6.5-1+mint22_amd64.deb": {
+    "clearwave_0.6.6-1+mint22_amd64.deb": {
       "sha256_verified": true,
       "same_compatible_executable": true,
       "nvidia_files_absent": true,
@@ -51,7 +51,7 @@
       "root_archive_ownership": true,
       "rust_dependency_notices": 140
     },
-    "clearwave_0.6.5-1+ubuntu24.04_amd64.deb": {
+    "clearwave_0.6.6-1+ubuntu24.04_amd64.deb": {
       "sha256_verified": true,
       "same_compatible_executable": true,
       "nvidia_files_absent": true,
@@ -63,8 +63,21 @@
   },
   "full_distribution_installations_tested": false,
   "mint_native_vm_tested": false,
-  "audio_quality_fix_in_this_release": false,
+  "audio_quality_fix_in_this_release": "Output projection layout and conditional lower-intensity mask scaling; residual muffling/static unresolved",
   "physical_audio_quality_verified": false,
+  "controlled_speech_validation": [
+    "docs/projection-quality-check.json",
+    "docs/natural-speech-check.json"
+  ],
+  "stream_validation": "docs/corrected-stream-check.json",
   "prior_model_loader_validation": "docs/model-source-check.json",
-  "prior_synthetic_gui_audio_validation": "docs/dll-free-gui-check.json"
+  "prior_synthetic_gui_audio_validation": "docs/dll-free-gui-check.json",
+  "live_routing_validation": "docs/live-routing-0.6.6.json",
+  "rust_lint": {
+    "toolchain": "1.93.1",
+    "all_targets": true,
+    "warnings_denied": true,
+    "passed": true
+  },
+  "rust_format_check_passed": true
 }

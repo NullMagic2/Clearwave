@@ -1,12 +1,19 @@
 # Clearwave
 
+**Experimental: speech quality and RTX Voice equivalence remain unverified.**
+Version 0.6.6 corrects an output-projection layout error in earlier builds that
+could suppress speech. Controlled comparisons with generated speech and two
+natural speech references improve after the correction. Muffled speech and
+residual static remain unresolved in a local microphone sample. CPU/GPU agreement
+alone is not a speech-quality result.
+
 ## What is Clearwave?
 
-Clearwave is an implementation which allows users to use NVIDIA RTX technology on AMD systems, allowing helping t o reduce background noise from your microphone, whether you’re recording, chatting with friends, or joining a video call. 
-It processes audio locally using your AMD graphics card and provides a virtual microphone you can select in your other apps. 
+Clearwave is an experimental effort to run the RTX Voice model on AMD-based Linux systems and reduce microphone background noise in recordings and calls.
+It processes audio locally using your AMD graphics card and provides a virtual microphone you can select in your other apps.
 
 ## Why was it created?
-NVIDIA’s noise reduction technology is impressive for recordings, but using it usually means having an NVIDIA setup. 
+NVIDIA’s noise reduction technology is impressive for recordings, but using it usually means having an NVIDIA setup.
 Clearwave was created to bring the same model to AMD-based Linux systems, without requiring NVIDIA drivers or running NVIDIA’s Windows application.
 
 
@@ -187,10 +194,34 @@ formats need conversion first, for example:
 ffmpeg -i recording.flac -ar 48000 -ac 1 -c:a pcm_s16le input.wav
 ```
 
-Strength defaults to 1.0; 0.0 gives unity spectral gain and 0.5 applies half the
-predicted removal. The feature commands return the raw network output; the audio
-path applies `gain = 1 - strength * noise_mask`. This control does not duplicate
-the vendor application's adaptive percentile control.
+Strength defaults to 1.0, which applies `gain = 1 - noise_mask`; 0.0 gives unity
+spectral gain. At intermediate settings, the strongest predicted-noise bins
+retain full suppression while the remaining bins use
+`gain = 1 - strength * noise_mask`. This implements the runtime's conditional
+intensity rule, although agreement with the running NVIDIA application remains
+unverified. The feature commands return the raw noise masks. See
+[the model contract](docs/MODEL_CONTRACT.md) for the threshold calculation.
+
+## Speech-quality evaluation
+
+The 0.6.6 projection correction improves clean-reference voice levels and
+noise separation in controlled comparisons, without adding output gain.
+On two natural clean speech references, measured voice attenuation falls from
+about 7 dB to less than 0.4 dB. These results do not establish quality for every
+microphone, speaker, or noise environment, or equivalence to NVIDIA's output.
+
+The reproducible local comparison tool accepts your own clean reference files:
+
+```sh
+python3 tools/benchmark_speech.py --binary bin/clearwave \
+  --model /path/to/models --clean /path/to/clean-speech.wav \
+  --output /path/to/new-comparison-directory
+```
+
+It requires Python 3, NumPy, and FFmpeg. The tool adds controlled static, hum,
+and clicks, runs full-strength processing, and reports voice level, SI-SDR, and
+noise after speech ends. Comparison audio stays in the specified local directory.
+See [the correction and measurement notes](docs/OUTPUT_PROJECTION.md).
 
 `wav-features` uses a periodic Hamming window, a 1,920-sample FFT, 480-sample hop,
 and 320 area-normalized Slaney mel bands. Mel power is clipped between −40 and

@@ -24,7 +24,13 @@ use `[output_channels, input_channels, kernel_time, kernel_frequency]` order.
 | Denoise GRU 1 | 10,496 | 256 | Stateful |
 | Denoise GRU 2 | 256 | 512 | Stateful |
 | Denoise GRU 3 | 512 | 1,024 | Stateful |
-| Output projection | 1,024 | 961 | Dense, bias, sigmoid |
+| Output projection | 1,024 | 961 | Stored `[1024, 961]` input-major matrix, dense, bias, sigmoid |
+
+The output projection is stored as `[input neuron, frequency bin]`, unlike the
+row-major output-by-input matrices consumed by execution kernels. It is
+transposed once at network setup, without changing exported tensor order. Both
+CPU and resident Vulkan execution use this conversion. Reading the stored buffer
+directly as `[961, 1024]` scrambles the projection and produces incorrect masks.
 
 All 32 tensor lengths are checked before network creation. The center frame is
 context index 3. The feature file interface zero-pads the first and last three
@@ -65,16 +71,21 @@ native adapter implements these stages:
 5. Scale each feature with
    `clamp((10*log10(max(power,2^-24)) + 40)/88, 0, 1)`.
 6. Run the stateful feature graph and apply the inverted raw prediction:
-   `gain[k] = 1 - strength*noise_mask[k]`. Mirror gains across negative-frequency
-   bins to retain conjugate symmetry. No square root is applied to the mask.
+   At full strength, `gain[k] = 1 - noise_mask[k]`. At lower strength, rank
+   `noise_power[k] = power[k]*noise_mask[k]`, retain full mask subtraction in
+   the strongest `floor(961*0.2*strength)` bins, and use
+   `gain[k] = 1 - strength*noise_mask[k]` in the remaining bins. When this count
+   is zero, scale every bin by strength. Mirror the computed gains across
+   negative-frequency bins to retain conjugate symmetry. No square root is
+   applied to the mask.
 7. Normalize the inverse FFT by 1,920, multiply by the synthesis Hamming window,
    overlap-add, and divide by the sum of overlapping squared windows.
 
 The supplied runtime's DSP constants and embedded magnitude, power-to-dB, and
 inverted-mask kernel instructions support these feature and gain conventions.
 This is static evidence, not a waveform comparison against the running vendor
-implementation. In particular, the offline strength parameter is direct linear
-mask blending; the vendor's percentile-dependent adjustment is not replicated.
+implementation. Version 0.6.6 adds the conditional percentile-dependent mask
+scaling; earlier versions used direct linear blending at every frequency.
 
 Frame `t` starts at sample `480*t - 1440`. The offline sequence has
 `ceil(input_samples/480) + 3` spectral frames. Three future feature frames supply

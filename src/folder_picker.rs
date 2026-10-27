@@ -148,10 +148,10 @@ pub fn run_helper(args: &[PathBuf]) -> Result<()> {
         } else {
             None
         };
-        if let Ok(message) = serde_json::to_string(&path) {
-            if message.len() < MAX_RESPONSE {
-                println!("{message}");
-            }
+        if let Ok(message) = serde_json::to_string(&path)
+            && message.len() < MAX_RESPONSE
+        {
+            println!("{message}");
         }
         dialog.hide();
         gtk::main_quit();

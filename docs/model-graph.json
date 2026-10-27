@@ -93,7 +93,7 @@
       "output": [
         961
       ],
-      "operation": "dense + sigmoid"
+      "operation": "input-major stored projection, transposed once for matvec, dense + sigmoid"
     }
   ],
   "layout": "Convolutions NCHW/OIHW; recurrent input is center frame; concatenate recurrent output then frequency-major convolution features",

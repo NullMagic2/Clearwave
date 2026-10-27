@@ -1,0 +1,10 @@
+{
+  "version": "0.6.6",
+  "stream_vs_offline_samples": 352786,
+  "stream_vs_offline_max_abs_error": 0.0,
+  "cpu_vs_amd_samples": 4807,
+  "cpu_vs_amd_max_abs_error": 5.960464477539063e-08,
+  "operator_checks_passed": 28,
+  "all_operator_checks_passed": true,
+  "scope": "Numerical and streaming regression checks, separate from speech quality and NVIDIA output equivalence."
+}

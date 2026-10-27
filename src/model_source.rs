@@ -206,7 +206,7 @@ mod tests {
         let mut header =
             serde_json::to_vec(&json!({"w":{"dtype":dtype,"shape":shape,"data_offsets":offsets}}))
                 .unwrap();
-        while header.len() % 8 != 0 {
+        while !header.len().is_multiple_of(8) {
             header.push(b' ');
         }
         let mut bytes = (header.len() as u64).to_le_bytes().to_vec();

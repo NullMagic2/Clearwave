@@ -53,7 +53,7 @@ impl From<serde_json::Error> for Error {
 }
 pub type Result<T> = std::result::Result<T, Error>;
 
-const HELP: &str = "clearwave 0.6.5 — voice processing on AMD Vulkan and PipeWire
+const HELP: &str = "clearwave 0.6.6 — voice processing on AMD Vulkan and PipeWire
 
 Commands:
   gui [BUNDLE_DIRECTORY] [--settings PREFERENCES.json]
@@ -361,15 +361,15 @@ fn stream_audio(args: &[PathBuf], cpu: bool) -> Result<()> {
             .chunks_exact(4)
             .map(|s| f32::from_le_bytes([s[0], s[1], s[2], s[3]]))
             .collect();
-        if hops % 10 == 0 {
-            if let Some(path) = &control {
-                match controls::StrengthControl::read(path) {
-                    Ok(next) => strength = next,
-                    Err(e) => eprintln!(
-                        "{}",
-                        json!({"event":"control_error","message":e.to_string()})
-                    ),
-                }
+        if hops.is_multiple_of(10)
+            && let Some(path) = &control
+        {
+            match controls::StrengthControl::read(path) {
+                Ok(next) => strength = next,
+                Err(e) => eprintln!(
+                    "{}",
+                    json!({"event":"control_error","message":e.to_string()})
+                ),
             }
         }
         let output = processor.push(&samples, strength, &mut predict)?;
@@ -382,7 +382,7 @@ fn stream_audio(args: &[PathBuf], cpu: bool) -> Result<()> {
         }
         writer.flush()?;
         hops += 1;
-        if meters && hops % 10 == 0 {
+        if meters && hops.is_multiple_of(10) {
             let (input_rms, input_peak) = input_levels.take();
             let (output_rms, output_peak) = output_levels.take();
             eprintln!(

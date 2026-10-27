@@ -1,0 +1,65 @@
+{
+  "scope": "Generated eSpeak speech and deterministic white noise, not a vendor reference or a human-speech quality certification. No private recordings.",
+  "cases": {
+    "clean": {
+      "input": {
+        "voice_projection_gain_db": 0.0,
+        "scale_invariant_sdr_db": 215.56302500767288,
+        "tail_noise_rms_dbfs": -240.0,
+        "peak": 0.6338382209379381
+      },
+      "released": {
+        "voice_projection_gain_db": -7.3825771938785545,
+        "scale_invariant_sdr_db": 7.118610829712829,
+        "tail_noise_rms_dbfs": -240.0,
+        "peak": 0.27226096391677856
+      },
+      "candidate": {
+        "voice_projection_gain_db": -0.13071473958065594,
+        "scale_invariant_sdr_db": 20.65967801027635,
+        "tail_noise_rms_dbfs": -240.0,
+        "peak": 0.6330340504646301
+      }
+    },
+    "snr10": {
+      "input": {
+        "voice_projection_gain_db": 0.00513233617898428,
+        "scale_invariant_sdr_db": 10.005147508194465,
+        "tail_noise_rms_dbfs": -34.437254282613544,
+        "peak": 0.6383318265428674
+      },
+      "released": {
+        "voice_projection_gain_db": -7.104039454806085,
+        "scale_invariant_sdr_db": 5.2099254085946365,
+        "tail_noise_rms_dbfs": -39.79296563923572,
+        "peak": 0.26855066418647766
+      },
+      "candidate": {
+        "voice_projection_gain_db": -0.41966004859008077,
+        "scale_invariant_sdr_db": 18.68224358052346,
+        "tail_noise_rms_dbfs": -85.95211550533286,
+        "peak": 0.6125987768173218
+      }
+    },
+    "snr0": {
+      "input": {
+        "voice_projection_gain_db": 0.01621951484749923,
+        "scale_invariant_sdr_db": 0.016234686862979335,
+        "tail_noise_rms_dbfs": -24.437254282613544,
+        "peak": 0.7136247700116702
+      },
+      "released": {
+        "voice_projection_gain_db": -6.779682215389943,
+        "scale_invariant_sdr_db": -1.7104386978672317,
+        "tail_noise_rms_dbfs": -29.875326912051364,
+        "peak": 0.32530269026756287
+      },
+      "candidate": {
+        "voice_projection_gain_db": -1.120966771394704,
+        "scale_invariant_sdr_db": 12.318822446081485,
+        "tail_noise_rms_dbfs": -74.45547096786575,
+        "peak": 0.572525680065155
+      }
+    }
+  }
+}

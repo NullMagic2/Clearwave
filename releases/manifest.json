@@ -1,25 +1,25 @@
 {
-  "version": "0.6.5",
+  "version": "0.6.6",
   "architecture": "amd64",
   "build_baseline": "Ubuntu 24.04 amd64 sysroot",
   "maximum_glibc_symbol": "2.39",
   "nvidia_assets_included": false,
-  "binary_sha256": "8971627b946b52e2967b6920662a73680010542a87dc6d59af709455144b2989",
+  "binary_sha256": "5f2e5bddeebcb3b8b4aabf681071c570031692dd7484f76455265211afee6df8",
   "packages": [
     {
-      "filename": "clearwave_0.6.5-1+debian13_amd64.deb",
+      "filename": "clearwave_0.6.6-1+debian13_amd64.deb",
       "target": "Debian 13",
-      "sha256": "d31feac0dd2bef7a022b622a9700c3e32ad96c7e88aa0544d73287cfc9e0fbec"
+      "sha256": "60aa7c0114dbd944bfd8c99024cf57a1bfc9194edc31034a56f870c09492bae8"
     },
     {
-      "filename": "clearwave_0.6.5-1+ubuntu24.04_amd64.deb",
+      "filename": "clearwave_0.6.6-1+ubuntu24.04_amd64.deb",
       "target": "Ubuntu 24.04 LTS and newer",
-      "sha256": "f495544e7d2da53903d37d9c3c4d3ede93ac01012420abd755e202d5eb449721"
+      "sha256": "1388fd4d224c4f29e4765b90ce1f73e1a362b998f9084c9f03efd827f132645e"
     },
     {
-      "filename": "clearwave_0.6.5-1+mint22_amd64.deb",
+      "filename": "clearwave_0.6.6-1+mint22_amd64.deb",
       "target": "Linux Mint 22.x",
-      "sha256": "bd33f15112b7a5b6101ef7ccc109af4bf904f1bddbf0dd4505b1700f7f806b91"
+      "sha256": "c00e4948458d47b30e58db977b008f4ce051313a56f47d2a8a88c03e127de13a"
     }
   ]
 }

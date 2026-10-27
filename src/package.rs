@@ -102,7 +102,7 @@ pub fn decode_package(bytes: &[u8], runtime: &[u8]) -> Result<Vec<u8>> {
     }
     let size = r.u32()? as usize;
     let encrypted = r.take(size)?;
-    if !r.is_empty() || size == 0 || size % 16 != 0 {
+    if !r.is_empty() || size == 0 || !size.is_multiple_of(16) {
         return Err(Error::new("Invalid ciphertext length"));
     }
 

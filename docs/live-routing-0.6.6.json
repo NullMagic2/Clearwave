@@ -1,0 +1,11 @@
+{
+  "version": "0.6.6",
+  "synthetic_source_only": true,
+  "captured_samples": 192000,
+  "finite_nonzero_audio": true,
+  "output_rms": 0.04938966780900955,
+  "virtual_device_name": "Generated speech QA \u2013 Clearwave",
+  "sigterm_cleaned_up": true,
+  "default_metadata_unchanged": true,
+  "scope": "CLI live routing through the release binary, generated speech and AMD Vulkan. No physical microphone capture; not a speech-quality or latency score."
+}

@@ -69,7 +69,7 @@ pub fn specification(model: &Model) -> Result<GraphSpec> {
         name: "noise_denoise_filter_1".into(),
         input: vec![1024],
         output: vec![GAINS],
-        operation: "dense + sigmoid",
+        operation: "input-major stored projection, transposed once for matvec, dense + sigmoid",
     });
     Ok(GraphSpec {
         input_context: CONTEXT,
@@ -89,6 +89,16 @@ fn check_size(model: &Model, name: &str, size: usize) -> Result<()> {
         )));
     }
     Ok(())
+}
+
+/// The stored output projection is [input neuron, frequency bin].
+/// Execution kernels consume [output row, input column]; convert once at setup.
+pub(crate) fn projection_weights(model: &Model) -> Result<Vec<f32>> {
+    operators::transpose_matrix(
+        &model.get("noise_denoise_filter_1_weights")?.values,
+        1024,
+        GAINS,
+    )
 }
 
 pub enum Backend {
@@ -149,6 +159,7 @@ pub struct Network<'a> {
     pub backend: Backend,
     state: [Vec<f32>; 4],
     resident: Option<ResidentGraph>,
+    projection: Vec<f32>,
     steps: usize,
 }
 impl<'a> Network<'a> {
@@ -158,11 +169,17 @@ impl<'a> Network<'a> {
             Backend::Gpu(gpu) => Some(ResidentGraph::new(gpu, model)?),
             Backend::Cpu => None,
         };
+        let projection = if resident.is_none() {
+            projection_weights(model)?
+        } else {
+            Vec::new()
+        };
         Ok(Self {
             model,
             backend,
             state: GRUS.map(|(_, _, h)| vec![0.0; h]),
             resident,
+            projection,
             steps: 0,
         })
     }
@@ -239,9 +256,7 @@ impl<'a> Network<'a> {
         for i in 1..4 {
             x = self.gru(i, &x, &mut state)?;
         }
-        let mut logits =
-            self.backend
-                .matvec(self.values("noise_denoise_filter_1_weights")?, &x, GAINS)?;
+        let mut logits = self.backend.matvec(&self.projection, &x, GAINS)?;
         for (v, b) in logits
             .iter_mut()
             .zip(self.values("noise_denoise_filter_1_bias")?)

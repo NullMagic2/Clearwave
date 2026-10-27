@@ -30,6 +30,10 @@ controller connects the streaming adapter to a temporary virtual microphone.
 | `i18n.rs`, `ui/flags/` | Five UI languages and embedded country flags | Implemented |
 | `controls.rs` | Validated local preferences, atomic live strength updates, RMS/peak aggregation | Implemented |
 
+The final projection retains input-major order in model files. CPU setup and
+resident GPU upload transpose it once to the execution matrix layout. This
+conversion is local to inference; export preserves original stored values.
+
 ## Data path
 
 The preferred path loads a Safetensors file directly into named F32 tensors and

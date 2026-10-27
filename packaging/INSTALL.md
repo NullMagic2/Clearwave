@@ -1,12 +1,17 @@
-# Clearwave 0.6.5 — Linux packages
+# Clearwave 0.6.6 — Linux packages
+
+**Experimental speech-quality update.** This build corrects a model projection
+layout error that could suppress speech and implements conditional intensity
+handling. Muffled speech and residual static remain unresolved in a local
+microphone sample; equivalence to NVIDIA's output has not been established.
 
 Download the matching **amd64 / x86-64** package:
 
 | Distribution | File |
 | --- | --- |
-| Debian 13 | `clearwave_0.6.5-1+debian13_amd64.deb` |
-| Ubuntu 24.04 LTS or newer | `clearwave_0.6.5-1+ubuntu24.04_amd64.deb` |
-| Linux Mint 22.x | `clearwave_0.6.5-1+mint22_amd64.deb` |
+| Debian 13 | `clearwave_0.6.6-1+debian13_amd64.deb` |
+| Ubuntu 24.04 LTS or newer | `clearwave_0.6.6-1+ubuntu24.04_amd64.deb` |
+| Linux Mint 22.x | `clearwave_0.6.6-1+mint22_amd64.deb` |
 
 The three packages contain the same compatible executable. They are local,
 unsigned builds. Older distribution releases and ARM processors are not targeted.
@@ -14,7 +19,7 @@ unsigned builds. Older distribution releases and ARM processors are not targeted
 From the directory containing your download, install its exact filename:
 
 ```sh
-sudo apt install ./clearwave_0.6.5-1+ubuntu24.04_amd64.deb
+sudo apt install ./clearwave_0.6.6-1+ubuntu24.04_amd64.deb
 ```
 
 Substitute the Debian or Mint filename as appropriate. APT installs the declared

@@ -1,0 +1,96 @@
+{
+  "noise_seed": 27102026,
+  "cases": {
+    "0-clean": {
+      "source": "5703-47212-0000.hq.ogg",
+      "source_sha256": "f09254a0daf4b14b292868d46dc2e3c8e158d19fafff739ad4c3931e2ce7b1b0",
+      "input": {
+        "voice_projection_gain_db": 0.0,
+        "si_sdr_db": 215.56302500767288,
+        "tail_rms_dbfs": -240.0
+      },
+      "candidate": {
+        "voice_projection_gain_db": -0.07252698826936045,
+        "si_sdr_db": 23.06403554742416,
+        "tail_rms_dbfs": -240.0
+      },
+      "baseline": {
+        "voice_projection_gain_db": -7.385533151201411,
+        "si_sdr_db": 8.301223419713175,
+        "tail_rms_dbfs": -240.0
+      }
+    },
+    "0-snr10-click-hum-static": {
+      "source": "5703-47212-0000.hq.ogg",
+      "source_sha256": "f09254a0daf4b14b292868d46dc2e3c8e158d19fafff739ad4c3931e2ce7b1b0",
+      "input": {
+        "voice_projection_gain_db": 0.002340299930029786,
+        "si_sdr_db": 10.0023434535976,
+        "tail_rms_dbfs": -34.41484691361477
+      },
+      "candidate": {
+        "voice_projection_gain_db": -0.8135294417877834,
+        "si_sdr_db": 15.970689955811636,
+        "tail_rms_dbfs": -71.67622282738067
+      },
+      "baseline": {
+        "voice_projection_gain_db": -5.420221350145126,
+        "si_sdr_db": 6.905444946333158,
+        "tail_rms_dbfs": -39.147652900287916
+      }
+    },
+    "1-clean": {
+      "source": "198-209-0000.hq.ogg",
+      "source_sha256": "6a8d2c16e56dcb27b7f5fe5aa99bfd26b4722a6dabca1968eff951b456936514",
+      "input": {
+        "voice_projection_gain_db": 0.0,
+        "si_sdr_db": 215.56302500767288,
+        "tail_rms_dbfs": -240.0
+      },
+      "candidate": {
+        "voice_projection_gain_db": -0.324930582550334,
+        "si_sdr_db": 15.577467582806959,
+        "tail_rms_dbfs": -240.0
+      },
+      "baseline": {
+        "voice_projection_gain_db": -6.989064020886043,
+        "si_sdr_db": 8.540175922060037,
+        "tail_rms_dbfs": -240.0
+      }
+    },
+    "1-snr10-click-hum-static": {
+      "source": "198-209-0000.hq.ogg",
+      "source_sha256": "6a8d2c16e56dcb27b7f5fe5aa99bfd26b4722a6dabca1968eff951b456936514",
+      "input": {
+        "voice_projection_gain_db": 0.01909377968940324,
+        "si_sdr_db": 10.019304111466994,
+        "tail_rms_dbfs": -34.4261122790498
+      },
+      "candidate": {
+        "voice_projection_gain_db": -0.4258874570642921,
+        "si_sdr_db": 17.293082948836403,
+        "tail_rms_dbfs": -63.44114063927527
+      },
+      "baseline": {
+        "voice_projection_gain_db": -6.803973329458204,
+        "si_sdr_db": 4.886101145201739,
+        "tail_rms_dbfs": -39.38723554218801
+      }
+    }
+  },
+  "scope": "Local clean-reference comparison, first 60 seconds of each clip. No automatic gain is added after denoising. Not vendor equivalence.",
+  "reference_sources": [
+    {
+      "file": "5703-47212-0000.hq.ogg",
+      "url": "https://librosa.org/data/audio/5703-47212-0000.hq.ogg",
+      "attribution": "The Ashiel Mystery, narrated by Garth Comira",
+      "license": "CC-BY-4.0"
+    },
+    {
+      "file": "198-209-0000.hq.ogg",
+      "url": "https://librosa.org/data/audio/198-209-0000.hq.ogg",
+      "attribution": "Sense and Sensibility, narrated by Heather Barnett",
+      "license": "CC-BY-4.0"
+    }
+  ]
+}

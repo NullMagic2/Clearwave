@@ -306,7 +306,7 @@ impl Gpu {
     ) -> Result<Vec<f32>> {
         if channels == 0
             || input.is_empty()
-            || input.len() % channels != 0
+            || !input.len().is_multiple_of(channels)
             || parameters.len() != 4 * channels
             || parameters[3 * channels..]
                 .iter()
