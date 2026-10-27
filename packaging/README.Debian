@@ -21,3 +21,7 @@ For manual CLI extraction, install 7zip, then use “clearwave --help”.
 
 Clearwave’s original code is MIT licensed; see LICENSE. For legal reasons,
 NVIDIA model files are not distributed. Obtain NVIDIA RTX Voice separately.
+
+For DLL-free processing, select a folder containing voice-weights.safetensors
+or model.safetensors. The original encrypted model plus NVAudioEffects.dll can
+also be together in the selected folder, or in their original NvAFX subfolders.

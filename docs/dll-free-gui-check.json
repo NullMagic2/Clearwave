@@ -1,0 +1,11 @@
+{
+  "version": "0.6.4",
+  "native_gui_started_from_actual_user_models_root": true,
+  "no_dll_in_selected_directory": true,
+  "synthetic_source_only": true,
+  "captured_samples": 24000,
+  "finite_nonzero_audio": true,
+  "rms": 0.033318642526865005,
+  "stop_removes_virtual_microphone": true,
+  "default_metadata_unchanged": true
+}

@@ -151,3 +151,25 @@ chooser hangs. See `folder-picker-check.json`.
 The development style guide is excluded from source release archives through
 `.gitattributes`; the existing 0.6.2 local and GitHub ZIPs were checked after
 refreshing archive metadata. Binary package allowlists already exclude it.
+
+## DLL-free model loading and root folders — 0.6.4
+
+All 30 Rust tests pass. Discovery accepts the original nested bundle, an
+encrypted model and decoder DLL together at the selected folder root, and an
+exported Safetensors model directly in that root or passed as a file.
+The official Rust Safetensors reader is supplemented with bounded file/header
+sizes, finite F32 values, tensor-name limits, and exact graph checks.
+
+The user's actual Models directory loaded its existing exported weights with
+no DLL present. A file-access trace confirmed that NVAudioEffects.dll was
+never opened. All 32 tensor inventories and 15,613,337 parameter values agreed
+with the original package. CPU outputs matched their original-package baseline
+byte-for-byte; AMD outputs also matched their original-package baseline
+byte-for-byte. On the 4,807-sample waveform fixture, the CPU/AMD maximum absolute
+difference was 1.862645149230957e-8. See `model-source-check.json`.
+
+Native GTK Start/Stop was exercised with that exact folder and a generated
+PipeWire tone source. The normal interface delivered 24,000 finite nonzero
+output samples, then removed its virtual microphone on Stop. System defaults
+were unchanged. See `dll-free-gui-check.json`. These checks do not establish
+speech preservation or vendor waveform equivalence.

@@ -1,12 +1,12 @@
-# Clearwave 0.6.3 — Linux packages
+# Clearwave 0.6.4 — Linux packages
 
 Download the matching **amd64 / x86-64** package:
 
 | Distribution | File |
 | --- | --- |
-| Debian 13 | `clearwave_0.6.3-1+debian13_amd64.deb` |
-| Ubuntu 24.04 LTS or newer | `clearwave_0.6.3-1+ubuntu24.04_amd64.deb` |
-| Linux Mint 22.x | `clearwave_0.6.3-1+mint22_amd64.deb` |
+| Debian 13 | `clearwave_0.6.4-1+debian13_amd64.deb` |
+| Ubuntu 24.04 LTS or newer | `clearwave_0.6.4-1+ubuntu24.04_amd64.deb` |
+| Linux Mint 22.x | `clearwave_0.6.4-1+mint22_amd64.deb` |
 
 The three packages contain the same compatible executable. They are local,
 unsigned builds. Older distribution releases and ARM processors are not targeted.
@@ -14,14 +14,17 @@ unsigned builds. Older distribution releases and ARM processors are not targeted
 From the directory containing your download, install its exact filename:
 
 ```sh
-sudo apt install ./clearwave_0.6.3-1+ubuntu24.04_amd64.deb
+sudo apt install ./clearwave_0.6.4-1+ubuntu24.04_amd64.deb
 ```
 
 Substitute the Debian or Mint filename as appropriate. APT installs the declared
 GTK3, SVG, Vulkan, and PipeWire dependencies. Launch **Clearwave** from the
 application menu or run `clearwave`.
 
-In Settings, choose your locally supplied extracted model bundle. NVIDIA assets
+In Settings, choose the folder containing your local `voice-weights.safetensors`
+(or `model.safetensors`) for DLL-free processing. Original encrypted model/DLL
+pairs may also be directly in the selected folder or under their original
+`NvAFX` subfolders. NVIDIA assets
 are **not included**. The app starts with capture stopped. It requires an AMD
 Vulkan driver and a running PipeWire session. Language selection, strength, and
 the single denoised-signal meter are included.

@@ -13,7 +13,7 @@ use std::{
 };
 use std::{
     io::{BufRead, BufReader},
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::{Child, Command, Stdio},
     sync::mpsc::{self, Receiver, SyncSender},
     time::{Duration, Instant},
@@ -262,16 +262,18 @@ impl Desktop {
                 self.preferences.language.text(Text::ChooseSource),
             ));
         }
-        let bundle = Path::new(&p.bundle)
-            .canonicalize()
-            .map_err(|_| Error::new(self.preferences.language.text(Text::ChooseBundle)))?;
-        if !bundle.join("NvAFX/models/denoiser_48k.wpkg").is_file()
-            || !bundle.join("NvAFX/nv/NVAudioEffects.dll").is_file()
-        {
+        if p.bundle.trim().is_empty() {
             return Err(Error::new(
-                self.preferences.language.text(Text::UnsupportedBundle),
+                self.preferences.language.text(Text::ChooseBundle),
             ));
         }
+        // All model discovery, file reads, and graph validation run in the live child.
+        let bundle = PathBuf::from(&p.bundle);
+        let bundle = if bundle.is_absolute() {
+            bundle
+        } else {
+            std::env::current_dir()?.join(bundle)
+        };
         let directory = self
             .settings_path
             .parent()

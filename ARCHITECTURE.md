@@ -12,6 +12,7 @@ controller connects the streaming adapter to a temporary virtual microphone.
 | Component | Responsibility | State |
 | --- | --- | --- |
 | `main.rs` | CLI dispatch, bundle extraction, JSON reporting | Implemented |
+| `model_source.rs` | Shared model discovery and validated DLL-free Safetensors loading | Implemented |
 | `pe.rs` | Bounded PE section/RVA access | Implemented |
 | `package.rs` | Package decoding, tensor parsing, hashes, inventory | Implemented for supplied package variant |
 | `export.rs` | Safetensors export retaining flat stored order | Implemented |
@@ -30,6 +31,10 @@ controller connects the streaming adapter to a temporary virtual microphone.
 | `controls.rs` | Validated local preferences/presets, atomic live strength updates, RMS/peak aggregation | Implemented |
 
 ## Data path
+
+The preferred path loads a Safetensors file directly into named F32 tensors and
+the compiled graph. The diagram below shows the optional original-package import
+and export path as well.
 
 ```text
 Local installer --7-Zip--> local bundle
@@ -50,8 +55,11 @@ Model package + runtime data --+--> validated payload --> named F32 tensors
 ```
 
 The installer is read as an archive. Its executable entry point and virtual-audio
-driver are never invoked. The native loader reads the supported runtime's
-version-specific data layout; it does not load or execute the Windows DLL.
+driver are never invoked. The compatibility importer reads version-specific data from the supported DLL
+when decoding the original encrypted package; it never executes that DLL.
+The preferred Safetensors path bypasses the DLL completely and validates the
+32 named F32 tensors against the compiled graph. The Rust/WGSL engine performs
+all inference in both cases.
 
 The payload is `weights_v0`: a 10-byte signature followed by repeated little-endian
 name length, UTF-8 name, element count, and IEEE-754 F32 data. Names and dimensions
@@ -74,8 +82,9 @@ audio latency or steady-state inference benchmark.
 
 ## Boundaries
 
-- Support is currently limited to the supplied single-segment package variant and
-  compatible 0.5.12.6 runtime layout. Other versions fail with explicit errors.
+- Original-package import is limited to the supplied single-segment package
+  variant and compatible 0.5.12.6 decoder-data layout. DLL-free loading accepts
+  the matching graph exported as Safetensors. Other graphs fail explicitly.
 - The raw tensor table contains 32 tensors and 15,613,337 F32 parameters.
 - The feature graph uses seven 320-value frames, three convolution/normalization
   stages, four stateful GRUs, and a 961-output sigmoid projection. It exposes
@@ -183,3 +192,22 @@ button becomes Cancel while a picker is active. Cancel, hiding Settings, or
 closing Clearwave signals the worker to kill and reap the owned helper; parent
 death also kills the helper. Settings is non-modal so the main window remains closable. Returned paths use
 a bounded JSON protocol.
+
+## Model locations
+
+`model_source.rs` is shared by GUI processing and all model CLI commands.
+It prefers `voice-weights.safetensors` or `model.safetensors` in the selected
+folder; CLI callers may pass a Safetensors file directly. The compatibility
+path accepts `denoiser_48k.wpkg` plus `NVAudioEffects.dll` together in that
+folder, or their original `NvAFX/models` and `NvAFX/nv` locations.
+An invalid preferred export fails without falling back to a proprietary file.
+
+The official Rust Safetensors reader validates the container. Clearwave adds
+128 MiB file and 1 MiB header limits, F32-only finite tensors, name limits,
+exact tensor count, and graph-shape checks. Safetensors `runtime_sha256` is
+null and `runtime_required` is false in inspection output. Its package hash
+identifies the exported container, and its payload hash identifies the raw
+tensor-data buffer. The original importer retains its original hash meanings.
+Model discovery and reads happen in the live child process, keeping the GTK
+thread free of model I/O. The graph JSON remains documentation, not a required
+model asset.

@@ -16,9 +16,10 @@ pub struct Tensor {
 
 #[derive(Debug)]
 pub struct Model {
+    pub format: &'static str,
     pub tensors: Vec<Tensor>,
     pub package_sha256: String,
-    pub runtime_sha256: String,
+    pub runtime_sha256: Option<String>,
     pub payload_sha256: String,
 }
 
@@ -36,9 +37,10 @@ impl Model {
         let runtime = read_bounded(runtime)?;
         let clear = decode_package(&package, &runtime)?;
         Ok(Self {
+            format: "NVnn v1 / weights_v0",
             tensors: parse_weights(&clear)?,
             package_sha256: hash(&package),
-            runtime_sha256: hash(&runtime),
+            runtime_sha256: Some(hash(&runtime)),
             payload_sha256: hash(&clear),
         })
     }

@@ -1,0 +1,23 @@
+{
+  "version": "0.6.4",
+  "layouts_checked": [
+    "nested",
+    "root-package",
+    "weights-only",
+    "direct-file",
+    "user-models-folder"
+  ],
+  "tensors": 32,
+  "parameters": 15613337,
+  "tensor_inventory_identical": true,
+  "actual_user_models_folder_loaded": true,
+  "dll_free_file_trace_verified": true,
+  "dll_free_runtime_sha256": null,
+  "cpu_legacy_vs_export_byte_identical": true,
+  "amd_legacy_vs_export_byte_identical": true,
+  "waveform_samples": 4807,
+  "cpu_amd_max_absolute_error": 1.862645149230957e-08,
+  "model_files_distributed": false,
+  "full_parameter_bytes_identical": true,
+  "parameter_bytes_compared": 62453348
+}

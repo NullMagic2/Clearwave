@@ -15,7 +15,7 @@ Clearwave was created to bring the same model to AMD-based Linux systems, withou
 For legal reasons, NVIDIA model files are not distributed with Clearwave.
 They can be obtained by obtaining **NVIDIA RTX Voice** separately; see
 [NVIDIA’s RTX Voice setup and download guide](https://www.nvidia.com/en-us/geforce/guides/nvidia-rtx-voice-setup-guide/).
-Clearwave currently supports the model bundle from RTX Voice **0.5.12.6**.
+Clearwave currently supports the model bundle from RTX Voice **0.5.12.6**. Once exported, the weights run directly in Clearwave’s Rust/WGSL engine; no NVIDIA DLL is needed for normal use.
 The installer, model packages, NVIDIA DLLs, and exported weights are excluded
 from this repository and its releases. NVIDIA’s files remain subject to NVIDIA’s
 license; Clearwave’s MIT license does not apply to them.
@@ -95,6 +95,28 @@ different Cargo executable. Default output is a native Linux executable.
 
 ## Load the supplied model
 
+For DLL-free use, put `voice-weights.safetensors` (or `model.safetensors`)
+directly in your model folder and select that folder in Settings. No graph JSON
+or DLL is needed. CLI commands also accept a `.safetensors` file directly.
+The file must contain the supported denoising graph's 32 F32 tensors, as written
+by Clearwave's `export` command; arbitrary neural networks are not supported.
+
+If you use the original encrypted package instead, both files may be together
+at the root of the selected folder:
+
+```text
+Models/
+├── denoiser_48k.wpkg
+└── NVAudioEffects.dll
+```
+
+The original `NvAFX/models/denoiser_48k.wpkg` and
+`NvAFX/nv/NVAudioEffects.dll` layout remains supported. Exported weights take
+priority when present. An invalid export is reported as an error instead of
+silently falling back to the DLL-dependent path.
+
+To extract and export weights once from your own installer:
+
 7-Zip is needed only for the initial archive extraction. The destination must be
 new; vendor assets stay external to the executable.
 
@@ -104,6 +126,7 @@ mkdir -p runtime
   /path/to/NVIDIA_RTX_Voice_v0.5.12.6_Updated.exe runtime/vendor
 ./bin/clearwave inspect runtime/vendor
 ./bin/clearwave export runtime/vendor runtime/voice-weights.safetensors
+./bin/clearwave inspect runtime/voice-weights.safetensors
 ```
 
 The original file names, package payload, tensor names, and F32 values are

@@ -7,6 +7,7 @@ mod fft;
 mod folder_picker;
 mod gpu;
 mod i18n;
+mod model_source;
 mod network;
 mod operators;
 mod package;
@@ -52,7 +53,7 @@ impl From<serde_json::Error> for Error {
 }
 pub type Result<T> = std::result::Result<T, Error>;
 
-const HELP: &str = "clearwave 0.6.3 — voice processing on AMD Vulkan and PipeWire
+const HELP: &str = "clearwave 0.6.4 — voice processing on AMD Vulkan and PipeWire
 
 Commands:
   gui [BUNDLE_DIRECTORY] [--settings PREFERENCES.json]
@@ -78,8 +79,10 @@ Commands:
        [--meters true|false] [--control-file STRENGTH.json]
   make-default-mic
 
-The bundle must contain NvAFX/models/denoiser_48k.wpkg and
-NvAFX/nv/NVAudioEffects.dll from the supplied 0.5.12.6 installer.
+Model locations accept a .safetensors file directly, or a folder containing
+voice-weights.safetensors or model.safetensors. This mode needs no NVIDIA DLL.
+Original 0.5.12.6 packages remain supported: denoiser_48k.wpkg and NVAudioEffects.dll
+may be together in the selected folder, or under NvAFX/models and NvAFX/nv.
 GPU checks execute isolated real weight matrices and compare against CPU f64.
 Feature inference reads 320 little-endian F32 values per frame and writes 961 raw mask values.
 WAV commands accept 48000 Hz PCM16/24/32 or float32 mono/stereo input.
@@ -156,7 +159,7 @@ fn run(args: Vec<PathBuf>) -> Result<()> {
             println!(
                 "{}",
                 serde_json::to_string_pretty(&json!({
-                    "format":"NVnn v1 / weights_v0","tensors":m.inventory(),
+                    "format":m.format,"tensors":m.inventory(),"runtime_required":m.runtime_sha256.is_some(),
                     "tensor_count":m.tensors.len(),"total_parameters":m.tensors.iter().map(|t|t.values.len()).sum::<usize>(),
                     "package_sha256":m.package_sha256,"runtime_sha256":m.runtime_sha256,"payload_sha256":m.payload_sha256,
                     "waveform_processing_implemented":true,"full_denoiser_implemented":false
@@ -458,10 +461,7 @@ fn infer_features(
 }
 
 fn load(bundle: &Path) -> Result<package::Model> {
-    package::Model::load(
-        &bundle.join("NvAFX/models/denoiser_48k.wpkg"),
-        &bundle.join("NvAFX/nv/NVAudioEffects.dll"),
-    )
+    model_source::ModelSource::resolve(bundle)?.load()
 }
 fn extract(installer: &Path, destination: &Path) -> Result<()> {
     let installer = installer.canonicalize()?;
