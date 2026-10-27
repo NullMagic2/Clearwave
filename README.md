@@ -1,10 +1,14 @@
 # Clearwave
 
-Native GTK3 controls and Rust 2024 audio processing on AMD Vulkan. Version 0.6.2
-provides microphone selection, live noise-removal strength, a denoised signal
-level, and local presets. The virtual microphone is available to recording and
-calling applications. The original supplied model runs locally; vendor waveform
-parity and speech quality remain unverified.
+## What is Clearwave?
+
+Clearwave is an implementation which allows users to use NVIDIA RTX technology on AMD systems, allowing helping t o reduce background noise from your microphone, whether you’re recording, chatting with friends, or joining a video call. 
+It processes audio locally using your AMD graphics card and provides a virtual microphone you can select in your other apps. 
+
+## Why was it created?
+NVIDIA’s noise reduction technology is impressive for recordings, but using it usually means having an NVIDIA setup. 
+Clearwave was created to bring the same model to AMD-based Linux systems, without requiring NVIDIA drivers or running NVIDIA’s Windows application.
+
 
 ## Model files
 
@@ -186,28 +190,6 @@ uploads 8,960 bytes of context and reads back 3,844 bytes of mask data. GPU stat
 commits after successful output validation. The explicit CPU commands retain the
 independent CPU path.
 
-## Raw audio streaming
-
-```sh
-./bin/clearwave stream runtime/vendor 1.0 '7900' < input.f32 > processed.f32
-./bin/clearwave stream-cpu runtime/vendor 1.0 < input.f32 > reference.f32
-```
-
-Raw streams contain mono 48 kHz little-endian float32 waveform samples without
-headers. Do not feed a WAV file directly into this interface. Samples must be
-finite and within ±16. EOF flushes and crops the tail to the original sample
-count. Input that ends inside a float32 sample is rejected. The processor buffers
-a fixed window and seven-frame context rather than retaining the entire stream.
-Output is flushed in 480-sample hops. Diagnostics use stderr; stdout carries only
-audio bytes. A `stream_ready` JSON line indicates initialization is complete, and
-`stream_finished` reports the final counters on EOF.
-
-The adapter delays output by six hops (2,880 samples / 60 ms), in addition to
-device, input/output, scheduling, and compute delays. This is an algorithmic delay,
-not a measured microphone-to-application latency. Processing errors terminate the
-stream; restart it to begin a fresh recurrent sequence. No physical microphone,
-PipeWire route, or virtual microphone is created by the raw `stream` command.
-
 ## Use the processed microphone across applications
 
 Requires PipeWire/WirePlumber tools (`pw-dump`, `pw-loopback`, `pw-record`,
@@ -221,47 +203,3 @@ Requires PipeWire/WirePlumber tools (`pw-dump`, `pw-loopback`, `pw-record`,
 ```
 
 Choose the exact source name, current object ID, or serial listed by `sources`.
-The virtual microphone's visible label uses the original source description plus
-` – audio denoising` (an en dash). On this machine the label is
-`Ryzen HD Audio Controller Estéreo analógico – audio denoising`.
-
-Select that input in each application, or run this in another terminal while
-`live` is running to make it the system default input:
-
-```sh
-./bin/clearwave make-default-mic
-```
-
-WirePlumber's default applies to new streams that request automatic input
-selection. Applications explicitly pinned to a physical input must choose the
-denoised microphone themselves; existing streams may need to be restarted.
-The default selection is remembered by WirePlumber. `live` itself keeps the
-current defaults in place.
-
-Keep `live` running while applications use the processed microphone. Ctrl+C,
-SIGTERM, a disconnected source, or a failed child stops processing and removes
-its temporary nodes. Child processes also receive a parent-death signal if the
-controller is killed. No driver, system service, or audio configuration file is
-installed. `--seconds 30` runs for a limited duration.
-
-`--latency-ms` requests 5–100 ms of PipeWire buffering (default 10); hardware and
-the session manager can negotiate different values. The model's 60 ms algorithmic
-delay is additional. Device-to-application latency and speech quality remain
-unverified. The live chain is physical source → capture → AMD processing →
-virtual microphone; speakers are not part of it.
-
-The routing approach follows PipeWire's [loopback module](https://pipewire.pages.freedesktop.org/pipewire/page_module_loopback.html)
-and WirePlumber's [default-source command](https://pipewire.pages.freedesktop.org/wireplumber/man/wpctl.html).
-
-## Development
-
-```sh
-cargo fmt --check
-cargo test --locked --offline --target-dir .build
-cargo clippy --locked --offline --all-targets --target-dir .build -- -D warnings
-```
-
-Inspection and file-processing commands do not open microphones or change audio
-defaults. `live` opens the explicitly selected input; `make-default-mic` changes
-the default input when invoked. No vendor assets are distributed in the source
-project.
