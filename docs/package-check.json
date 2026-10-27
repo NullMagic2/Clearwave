@@ -1,16 +1,16 @@
 {
   "application": "Clearwave",
-  "version": "0.6.4",
+  "version": "0.6.5",
   "architecture": "amd64",
   "maximum_glibc_symbol": "2.39",
-  "binary_sha256": "9a13c5a1b311649cefd66d57379ef1127ebb6c4da0162596bb42717eebf23416",
+  "binary_sha256": "8971627b946b52e2967b6920662a73680010542a87dc6d59af709455144b2989",
   "application_license": "MIT",
   "rust_unit_tests": {
     "passed": 30,
     "failed": 0
   },
-  "model_source_validation": "docs/model-source-check.json",
-  "native_dll_free_gui_validation": "docs/dll-free-gui-check.json",
+  "interface_validation": "docs/simple-ui-check.json",
+  "folder_picker_validation": "docs/folder-picker-check.json",
   "installed_gui_checks": {
     "ubuntu24.04": {
       "native_window": true,
@@ -33,7 +33,7 @@
     "default_metadata_unchanged": true
   },
   "packages": {
-    "clearwave_0.6.4-1+debian13_amd64.deb": {
+    "clearwave_0.6.5-1+debian13_amd64.deb": {
       "sha256_verified": true,
       "same_compatible_executable": true,
       "nvidia_files_absent": true,
@@ -42,7 +42,7 @@
       "root_archive_ownership": true,
       "rust_dependency_notices": 140
     },
-    "clearwave_0.6.4-1+ubuntu24.04_amd64.deb": {
+    "clearwave_0.6.5-1+mint22_amd64.deb": {
       "sha256_verified": true,
       "same_compatible_executable": true,
       "nvidia_files_absent": true,
@@ -51,7 +51,7 @@
       "root_archive_ownership": true,
       "rust_dependency_notices": 140
     },
-    "clearwave_0.6.4-1+mint22_amd64.deb": {
+    "clearwave_0.6.5-1+ubuntu24.04_amd64.deb": {
       "sha256_verified": true,
       "same_compatible_executable": true,
       "nvidia_files_absent": true,
@@ -63,5 +63,8 @@
   },
   "full_distribution_installations_tested": false,
   "mint_native_vm_tested": false,
-  "prior_folder_picker_validation": "docs/folder-picker-check.json"
+  "audio_quality_fix_in_this_release": false,
+  "physical_audio_quality_verified": false,
+  "prior_model_loader_validation": "docs/model-source-check.json",
+  "prior_synthetic_gui_audio_validation": "docs/dll-free-gui-check.json"
 }

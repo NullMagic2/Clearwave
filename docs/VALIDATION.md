@@ -173,3 +173,25 @@ PipeWire tone source. The normal interface delivered 24,000 finite nonzero
 output samples, then removed its virtual microphone on Stop. System defaults
 were unchanged. See `dll-free-gui-check.json`. These checks do not establish
 speech preservation or vendor waveform equivalence.
+
+## Simplified controls and virtual microphone label — 0.6.5
+
+Named presets and their UI controls were removed. Active audio settings and
+language survive the schema 1 to schema 2 migration; old preset entries are
+ignored and omitted on saving. Start and Stop use the shortened labels in all
+five languages. Both the preview and newly created PipeWire source descriptions
+use the original microphone name followed by ` – Clearwave`.
+
+All 30 Rust tests and formatting checks passed. Native GTK checks opened the
+simplified main window and 339-pixel-high Settings dialog, saved migrated settings,
+and closed Settings without closing the main window. Ubuntu 24.04 and Debian 13
+runtime checks preserved active settings and did not change audio defaults.
+The folder chooser fault-injection checks also passed, including cancellation
+and application shutdown while its helper was stopped. See `simple-ui-check.json`,
+`folder-picker-check.json`, and `package-check.json`.
+
+The three amd64 packages contain the same compatible executable, MIT application
+license, and 140 Rust dependency notices. Checksums, root ownership, and exclusion
+of NVIDIA files and the development style guide were verified. This release
+changes controls and naming; it does not claim a fix for physical-input static or
+validated speech-denoising quality. No private microphone captures are included.

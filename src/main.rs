@@ -53,7 +53,7 @@ impl From<serde_json::Error> for Error {
 }
 pub type Result<T> = std::result::Result<T, Error>;
 
-const HELP: &str = "clearwave 0.6.4 — voice processing on AMD Vulkan and PipeWire
+const HELP: &str = "clearwave 0.6.5 — voice processing on AMD Vulkan and PipeWire
 
 Commands:
   gui [BUNDLE_DIRECTORY] [--settings PREFERENCES.json]

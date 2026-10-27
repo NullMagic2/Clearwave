@@ -1,4 +1,4 @@
-//! Saved desktop presets and bounded live control/level messages.
+//! Saved current settings and bounded live control/level messages.
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -10,14 +10,14 @@ use std::{
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]
-pub struct Preset {
+pub struct AudioSettings {
     pub bundle: String,
     pub source: String,
     pub adapter: String,
     pub strength: f32,
     pub latency_ms: u16,
 }
-impl Default for Preset {
+impl Default for AudioSettings {
     fn default() -> Self {
         Self {
             bundle: String::new(),
@@ -28,7 +28,7 @@ impl Default for Preset {
         }
     }
 }
-impl Preset {
+impl AudioSettings {
     pub fn validate(&self) -> Result<()> {
         crate::audio::validate_strength(self.strength)?;
         if !(5..=100).contains(&self.latency_ms)
@@ -36,15 +36,10 @@ impl Preset {
                 .iter()
                 .any(|v| v.len() > 4096 || v.contains('\0'))
         {
-            return Err(Error::new("Invalid preset latency or text field"));
+            return Err(Error::new("Invalid audio settings latency or text field"));
         }
         Ok(())
     }
-}
-#[derive(Clone, Serialize, Deserialize)]
-pub struct NamedPreset {
-    pub name: String,
-    pub settings: Preset,
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -52,38 +47,35 @@ pub struct Preferences {
     pub version: u8,
     #[serde(default)]
     pub language: crate::i18n::Language,
-    pub active: Preset,
-    pub presets: Vec<NamedPreset>,
+    pub active: AudioSettings,
+    // Read and discard the removed field from older saved settings.
+    #[serde(default, skip_serializing, rename = "presets")]
+    _legacy_presets: serde::de::IgnoredAny,
 }
 impl Default for Preferences {
     fn default() -> Self {
         Self {
-            version: 1,
+            version: 2,
             language: crate::i18n::Language::default(),
-            active: Preset::default(),
-            presets: Vec::new(),
+            active: AudioSettings::default(),
+            _legacy_presets: serde::de::IgnoredAny,
         }
     }
 }
 impl Preferences {
     pub fn validate(&self) -> Result<()> {
-        if self.version != 1 || self.presets.len() > 32 {
-            return Err(Error::new(
-                "Unsupported settings version or too many presets",
-            ));
+        if self.version != 2 {
+            return Err(Error::new("Unsupported settings version"));
         }
-        self.active.validate()?;
-        let mut names = std::collections::HashSet::new();
-        for preset in &self.presets {
-            if preset.name.trim().is_empty()
-                || preset.name.len() > 64
-                || !names.insert(&preset.name)
-            {
-                return Err(Error::new("Preset names must be unique and 1–64 bytes"));
-            }
-            preset.settings.validate()?;
+        self.active.validate()
+    }
+    fn decode(values: &[u8]) -> Result<Self> {
+        let mut preferences: Self = serde_json::from_slice(values)?;
+        if preferences.version == 1 {
+            preferences.version = 2;
         }
-        Ok(())
+        preferences.validate()?;
+        Ok(preferences)
     }
     pub fn load(path: &Path) -> Result<Self> {
         let values = match bounded_read(path, 256 * 1024) {
@@ -101,9 +93,7 @@ impl Preferences {
             }
             Err(e) => return Err(e),
         };
-        let preferences: Self = serde_json::from_slice(&values)?;
-        preferences.validate()?;
-        Ok(preferences)
+        Self::decode(&values)
     }
     pub fn save(&self, path: &Path) -> Result<()> {
         self.validate()?;
@@ -113,26 +103,8 @@ impl Preferences {
         }
         atomic_write(path, &bytes)
     }
-    pub fn store_preset(&mut self, name: &str) -> Result<()> {
-        let name = name.trim();
-        if name.is_empty() || name.len() > 64 {
-            return Err(Error::new("Enter a preset name of 1–64 bytes"));
-        }
-        self.active.validate()?;
-        if let Some(existing) = self.presets.iter_mut().find(|p| p.name == name) {
-            existing.settings = self.active.clone();
-        } else {
-            if self.presets.len() == 32 {
-                return Err(Error::new("A maximum of 32 saved presets is supported"));
-            }
-            self.presets.push(NamedPreset {
-                name: name.into(),
-                settings: self.active.clone(),
-            });
-        }
-        Ok(())
-    }
 }
+
 pub fn runtime_directory() -> Result<PathBuf> {
     let executable = std::env::current_exe()?;
     let parent = executable
@@ -234,7 +206,7 @@ mod tests {
     #[test]
     fn language_preferences_accept_old_files_and_round_trip_each_locale() {
         let old = r#"{"version":1,"active":{},"presets":[]}"#;
-        let mut preferences: Preferences = serde_json::from_str(old).unwrap();
+        let mut preferences = Preferences::decode(old.as_bytes()).unwrap();
         assert_eq!(preferences.language, crate::i18n::Language::EnglishBritish);
         for language in crate::i18n::Language::ALL {
             preferences.language = language;
@@ -247,24 +219,23 @@ mod tests {
         assert!(serde_json::from_str::<Preferences>(&unsupported).is_err());
     }
     #[test]
-    fn presets_round_trip_and_reject_invalid_values() {
-        let mut p = Preferences::default();
-        p.active.source = "mic-1".into();
-        p.active.strength = 0.4;
-        p.store_preset("Speech").unwrap();
-        p.active.strength = 0.8;
-        p.store_preset("Speech").unwrap();
-        assert_eq!(p.presets.len(), 1);
-        assert_eq!(p.presets[0].settings.strength, 0.8);
-        let decoded: Preferences =
-            serde_json::from_slice(&serde_json::to_vec(&p).unwrap()).unwrap();
-        decoded.validate().unwrap();
+    fn old_preferences_keep_active_settings_and_drop_named_presets() {
+        let old = br#"{"version":1,"language":"pt-BR","active":{"bundle":"/models","source":"mic-1","adapter":"AMD","strength":0.4,"latency_ms":20},"presets":[{"name":"Speech","settings":{"strength":0.8}}]}"#;
+        let mut p = Preferences::decode(old).unwrap();
+        assert_eq!(p.version, 2);
+        assert_eq!(p.active.source, "mic-1");
+        assert_eq!(p.active.bundle, "/models");
+        assert_eq!(p.active.adapter, "AMD");
+        assert_eq!(p.active.latency_ms, 20);
+        assert_eq!(p.active.strength, 0.4);
+        assert_eq!(p.language, crate::i18n::Language::PortugueseBrazil);
+        let saved = serde_json::to_value(&p).unwrap();
+        assert!(saved.get("presets").is_none());
+        let decoded = Preferences::decode(&serde_json::to_vec(&saved).unwrap()).unwrap();
         assert_eq!(decoded.active, p.active);
         p.active.strength = 2.0;
         assert!(p.validate().is_err());
-        p.active.strength = 0.8;
-        p.presets.push(p.presets[0].clone());
-        assert!(p.validate().is_err());
+        assert!(Preferences::decode(br#"{"version":99,"active":{}}"#).is_err());
     }
     #[test]
     fn level_measurements_are_real_and_reset_per_window() {

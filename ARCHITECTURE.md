@@ -28,7 +28,7 @@ controller connects the streaming adapter to a temporary virtual microphone.
 | `pipewire.rs` | Source enumeration, temporary virtual microphone, stream lifecycle, latency requests | Implemented |
 | `desktop.rs` | Native GTK3 window/settings dialog, device selection, child lifecycle, a measured denoised-signal bar | Implemented |
 | `i18n.rs`, `ui/flags/` | Five UI languages and embedded country flags | Implemented |
-| `controls.rs` | Validated local preferences/presets, atomic live strength updates, RMS/peak aggregation | Implemented |
+| `controls.rs` | Validated local preferences, atomic live strength updates, RMS/peak aggregation | Implemented |
 
 ## Data path
 
@@ -124,7 +124,7 @@ audio latency or steady-state inference benchmark.
   be this application's own virtual input. No service or driver is installed.
 - Virtual node names are stable internal routing identifiers. The user-visible
   description is the selected physical source description followed by the en-dash
-  suffix ` – audio denoising`.
+  suffix ` – Clearwave`.
 
 ## Desktop lifecycle
 
@@ -136,13 +136,13 @@ Child lifetime safeguards also apply if the desktop exits unexpectedly.
 
 The main window contains source selection, a strength slider, one denoised signal
 bar, the virtual source description, and explicit start/default-input buttons. A non-modal
-settings dialog launches the isolated GTK folder chooser, AMD device and buffering
-options, and named presets. Configuration that requires reconnecting is disabled
+settings dialog provides an isolated GTK folder chooser, AMD device selection,
+and buffering options. Configuration that requires reconnecting is disabled
 while running. Strength is published atomically to a validated control file and
 read every ten audio hops; changing it preserves the stream and recurrent state.
 
 The header's flag menu applies one of five built-in UI translations immediately.
-Language is a global desktop preference, separate from audio presets; older JSON
+Language is a global desktop preference; older JSON
 files default to British English. Country flags are original `flag-icons` SVG assets, pinned to the revision in
 `ui/flags/SOURCE.json`, embedded and rendered at 24×18 pixels by GdkPixbuf. The MIT
 notice is stored beside the assets and embedded in the `licenses` CLI command. Device descriptions and the established virtual-source suffix keep
@@ -151,7 +151,8 @@ content retain their own wording.
 
 Preferences have bounded, versioned JSON storage. Active settings are saved after
 a short debounce. Invalid existing preferences are preserved until an explicit
-save. Presets include source, model folder, device, strength, and buffering.
+save. Schema version 2 preserves active settings and language from version 1 while
+discarding its removed named-preset list.
 Meter events contain RMS and peak values computed from real input/output samples;
 stale readings clear after 600 ms. No signal is inferred from node existence.
 

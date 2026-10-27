@@ -266,7 +266,7 @@ pub fn live(bundle: &Path, selector: &str, options: LiveOptions) -> Result<()> {
     let signals = StopSignals::new()?;
     let mut children = Children(Vec::new());
     let capture_props = json!({"media.class":"Audio/Sink","node.name":INPUT,"node.description":"Clearwave Processing Input","node.virtual":true,"node.autoconnect":false,"priority.session":0});
-    let playback_props = json!({"media.class":"Audio/Source","node.name":MICROPHONE,"node.description":format!("{} – audio denoising", source.description),"node.virtual":true,"node.autoconnect":false,"priority.session":0});
+    let playback_props = json!({"media.class":"Audio/Source","node.name":MICROPHONE,"node.description":format!("{} – Clearwave", source.description),"node.virtual":true,"node.autoconnect":false,"priority.session":0});
     children.add(
         "virtual microphone",
         child_command("pw-loopback").args([

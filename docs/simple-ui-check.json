@@ -1,0 +1,9 @@
+{
+  "version": "0.6.5",
+  "native_main_window": true,
+  "settings_dialog_height": 339,
+  "settings_close_keeps_main_open": true,
+  "version_1_active_settings_preserved": true,
+  "schema_2_saved_without_presets": true,
+  "scope": "Idle GTK UI only; no audio capture or default-device changes."
+}

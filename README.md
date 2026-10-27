@@ -35,8 +35,8 @@ binary packages also include Rust dependency notices.
 ./bin/clearwave gui runtime/vendor --settings runtime/desktop.json
 ```
 
-Choose a microphone, adjust **Noise removal**, and click **Start denoising**.
-Select the resulting `<original microphone> – audio denoising` input in your
+Choose a microphone, adjust **Noise removal**, and click **Start**.
+Select the resulting `<original microphone> – Clearwave` input in your
 recording or calling application. **Use as system microphone** explicitly changes
 the system default; apps with a fixed input still need their own selection.
 The window opens with capture stopped. Closing it stops its owned audio stream.
@@ -47,10 +47,9 @@ The interface updates immediately and remembers the selection in desktop setting
 The country flags come from [flag-icons](https://github.com/lipis/flag-icons),
 licensed under MIT. Their original SVGs and attribution are in `ui/flags/`;
 `./bin/clearwave licenses` also displays the embedded copyright notice.
-The settings button opens model folder, AMD device, buffer, and preset controls. While the folder picker is open, **Cancel** in Settings closes it; you can also enter the model folder path directly. Closing Clearwave stops its folder picker, including an unresponsive one. The model folder is detected from `runtime/vendor` beside the project.
-Active settings are saved locally to `runtime/desktop.json`. Named presets can be
-saved, loaded while stopped, and deleted. Microphone, model, device, and buffer
-selection are locked while processing; strength changes apply without reconnecting
+The settings button opens the model folder, AMD device, and buffer controls. While the folder picker is open, **Cancel** in Settings closes it; you can also enter the model folder path directly. Closing Clearwave stops its folder picker, including an unresponsive one. The model folder is detected from `runtime/vendor` beside the project.
+Active settings are saved automatically to `runtime/desktop.json`. Microphone,
+model, device, and buffer selection are locked while processing; strength changes apply without reconnecting
 applications. The single signal bar reports denoised RMS in dBFS; hovering shows
 its peak level.
 

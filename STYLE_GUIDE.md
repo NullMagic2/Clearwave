@@ -19,7 +19,7 @@ command-line interface. Prefer descriptive domain names and plain error messages
 - Live capture requires an explicit source. Use temporary PipeWire nodes, clean up
   owned subprocesses, and preserve current defaults unless the user invokes the
   explicit default-selection command. Virtual microphone descriptions append
-  ` – audio denoising` to the original source description using an en dash.
+  ` – Clearwave` to the original source description using an en dash.
 
 ## GPU code
 
@@ -43,7 +43,7 @@ intermediate build files do not belong in `bin/`.
 
 Use native GTK3 widgets and the user's theme. Keep the main window focused on
 microphone selection, strength, the denoised signal bar, and starting/stopping.
-Put configuration and presets in Settings. Keep widget access on the main thread;
+Put advanced configuration in Settings. Save active settings automatically. Keep widget access on the main thread;
 communicate with workers using bounded data messages. Avoid starting capture on launch. Display
 the measured denoised output only and clear stale readings.
 

@@ -480,11 +480,6 @@ struct Interface {
     browse: gtk::Button,
     adapter: gtk::ComboBoxText,
     latency: gtk::SpinButton,
-    presets: gtk::ComboBoxText,
-    preset_name: gtk::Entry,
-    load: gtk::Button,
-    delete: gtk::Button,
-    store: gtk::Button,
     save: gtk::Button,
     updating: Rc<Cell<bool>>,
     revision: Rc<Cell<u64>>,
@@ -625,7 +620,7 @@ impl Interface {
         destination.add(&use_default);
         content.add(&destination);
 
-        let start = gtk::Button::with_label("Start denoising");
+        let start = gtk::Button::with_label("Start");
         start.style_context().add_class("suggested-action");
         start.set_height_request(42);
         content.add(&start);
@@ -641,7 +636,7 @@ impl Interface {
             gtk::DialogFlags::DESTROY_WITH_PARENT,
             &[("Close", gtk::ResponseType::Close)],
         );
-        settings.set_default_size(580, 460);
+        settings.set_default_size(580, 310);
         settings.set_resizable(false);
         settings.connect_response(|dialog, _| dialog.hide());
         settings.connect_delete_event(|dialog, _| {
@@ -674,27 +669,6 @@ impl Interface {
         note.set_max_width_chars(54);
         note.style_context().add_class("dim-label");
         panel.add(&note);
-        panel.add(&gtk::Separator::new(gtk::Orientation::Horizontal));
-        let saved = vertical(8);
-        saved.add(&translated(Text::Presets));
-        let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        let presets = gtk::ComboBoxText::new();
-        presets.set_hexpand(true);
-        let load = gtk::Button::with_label("Load");
-        let delete = gtk::Button::with_label("Delete");
-        row.pack_start(&presets, true, true, 0);
-        row.pack_start(&load, false, false, 0);
-        row.pack_start(&delete, false, false, 0);
-        saved.add(&row);
-        let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        let preset_name = gtk::Entry::new();
-        preset_name.set_placeholder_text(Some("Preset name"));
-        preset_name.set_max_length(64);
-        let store = gtk::Button::with_label("Save preset");
-        row.pack_start(&preset_name, true, true, 0);
-        row.pack_end(&store, false, false, 0);
-        saved.add(&row);
-        panel.add(&saved);
         let save = gtk::Button::with_label("Save settings");
         save.set_halign(gtk::Align::Start);
         panel.add(&save);
@@ -709,9 +683,6 @@ impl Interface {
         let mut buttons = vec![
             (use_default.clone(), Text::Default),
             (browse.clone(), Text::Browse),
-            (load.clone(), Text::Load),
-            (delete.clone(), Text::Delete),
-            (store.clone(), Text::SavePreset),
             (save.clone(), Text::Save),
         ];
         if let Some(close) = settings
@@ -747,11 +718,6 @@ impl Interface {
             browse,
             adapter,
             latency,
-            presets,
-            preset_name,
-            load,
-            delete,
-            store,
             save,
             updating: Rc::new(Cell::new(false)),
             revision: Rc::new(Cell::new(u64::MAX)),
@@ -786,8 +752,6 @@ impl Interface {
             .set_tooltip_text(Some(language.text(Text::StrengthTip)));
         self.use_default
             .set_tooltip_text(Some(language.text(Text::DefaultTip)));
-        self.preset_name
-            .set_placeholder_text(Some(language.text(Text::PresetName)));
     }
 
     fn sync_choices(&self, state: &Desktop) {
@@ -815,12 +779,6 @@ impl Interface {
         } else {
             selected
         }));
-        let chosen = self.presets.active_id();
-        self.presets.remove_all();
-        for preset in &state.preferences.presets {
-            self.presets.append(Some(&preset.name), &preset.name);
-        }
-        self.presets.set_active_id(chosen.as_deref());
         self.bundle.set_text(&state.preferences.active.bundle);
         self.latency
             .set_value(state.preferences.active.latency_ms.into());
@@ -864,10 +822,6 @@ impl Interface {
         self.source.set_sensitive(live.is_none());
         self.refresh.set_sensitive(live.is_none());
         self.configuration.set_sensitive(live.is_none());
-        self.load
-            .set_sensitive(live.is_none() && self.presets.active_id().is_some());
-        self.delete
-            .set_sensitive(self.presets.active_id().is_some());
         self.use_default.set_sensitive(ready);
         self.percent.set_text(&format!(
             "{:.0}%",
@@ -880,7 +834,7 @@ impl Interface {
                 .sources
                 .iter()
                 .find(|n| n.name == state.preferences.active.source)
-                .map(|n| format!("{} – audio denoising", n.description))
+                .map(|n| format!("{} – Clearwave", n.description))
                 .unwrap_or_else(|| language.text(Text::ChooseMicrophone).into())
         };
         self.output.set_text(&output);
@@ -1090,62 +1044,6 @@ impl Interface {
                 let mut state = state.borrow_mut();
                 state.preferences.active.latency_ms = spin.value_as_int() as u16;
                 state.changed();
-            }
-        });
-        let weak = Rc::downgrade(state);
-        let presets = self.presets.clone();
-        self.load.connect_clicked(move |_| {
-            if let (Some(state), Some(name)) = (weak.upgrade(), presets.active_id()) {
-                let mut state = state.borrow_mut();
-                if let Some(preset) = state.preferences.presets.iter().find(|p| p.name == name) {
-                    state.preferences.active = preset.settings.clone();
-                    state.revision += 1;
-                    state.changed();
-                    state.message = Some((
-                        false,
-                        format!(
-                            "{}: {name}",
-                            state.preferences.language.text(Text::LoadedPreset)
-                        ),
-                    ));
-                }
-            }
-        });
-        let weak = Rc::downgrade(state);
-        let presets = self.presets.clone();
-        self.delete.connect_clicked(move |_| {
-            if let (Some(state), Some(name)) = (weak.upgrade(), presets.active_id()) {
-                let mut state = state.borrow_mut();
-                state.preferences.presets.retain(|p| p.name != name);
-                state.revision += 1;
-                state.save(true);
-            }
-        });
-        let weak = Rc::downgrade(state);
-        let name = self.preset_name.clone();
-        self.store.connect_clicked(move |_| {
-            if let Some(state) = weak.upgrade() {
-                let mut state = state.borrow_mut();
-                match state.preferences.store_preset(name.text().as_str()) {
-                    Ok(()) => {
-                        state.revision += 1;
-                        state.save(true);
-                    }
-                    Err(e) => {
-                        let text = match e.to_string().as_str() {
-                            "Enter a preset name of 1–64 bytes" => state
-                                .preferences
-                                .language
-                                .text(Text::EnterPresetName)
-                                .into(),
-                            "A maximum of 32 saved presets is supported" => {
-                                state.preferences.language.text(Text::MaxPresets).into()
-                            }
-                            _ => e.to_string(),
-                        };
-                        state.message = Some((true, text));
-                    }
-                }
             }
         });
         let weak = Rc::downgrade(state);
