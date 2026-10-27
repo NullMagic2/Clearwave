@@ -1,0 +1,10 @@
+{
+  "passed": true,
+  "input_samples": 76800,
+  "level_messages": 16,
+  "strength_changed_without_restart": true,
+  "invalid_control_retains_last_value": true,
+  "input_rms": 0.0707106813788414,
+  "bypass_output_rms": 0.0707106739282608,
+  "scope": "Measured levels and live control on a paced synthetic stream; no physical microphone captured"
+}

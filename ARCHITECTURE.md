@@ -1,0 +1,173 @@
+# Architecture
+
+This is a native Linux Rust 2024 model-loading and AMD-compute prototype.
+The current binary loads the supplied NVIDIA RTX Voice 0.5.12.6 model package,
+exports named tensors, and processes WAV recordings through a connected network
+on AMD Vulkan hardware. Its waveform adapter runs on the CPU. Vendor audio-output
+parity, speech quality, and device latency remain unverified. A live PipeWire
+controller connects the streaming adapter to a temporary virtual microphone.
+
+## Components
+
+| Component | Responsibility | State |
+| --- | --- | --- |
+| `main.rs` | CLI dispatch, bundle extraction, JSON reporting | Implemented |
+| `pe.rs` | Bounded PE section/RVA access | Implemented |
+| `package.rs` | Package decoding, tensor parsing, hashes, inventory | Implemented for supplied package variant |
+| `export.rs` | Safetensors export retaining flat stored order | Implemented |
+| `gpu.rs` | AMD Vulkan selection, buffers, dispatch, readback | Implemented |
+| `shaders/matvec.wgsl` | Parallel matrix-vector multiplication | Implemented |
+| `shaders/operators.wgsl` | Convolution, normalization, activations, GRU update | Implemented |
+| `operators.rs` | CPU reference operators and shape contracts | Implemented |
+| `network.rs` | Shape checks, CPU reference graph, backend dispatch and recurrent state | Implemented; vendor audio-output parity pending |
+| `resident.rs` | Persistent Vulkan weights, graph buffers, bindings, dispatch and state commits | Implemented |
+| `wav.rs` | Bounded RIFF parsing, PCM decoding, stereo downmix, float WAV output | Implemented for 48 kHz mono/stereo |
+| `fft.rs` | Mixed-radix complex transform and normalized inverse | Implemented for factors 2/3/5 |
+| `audio.rs` | Spectral features, masks, overlap reconstruction, bounded streaming | Implemented; boundary conventions documented |
+| `pipewire.rs` | Source enumeration, temporary virtual microphone, stream lifecycle, latency requests | Implemented |
+| `desktop.rs` | Native GTK3 window/settings dialog, device selection, child lifecycle, a measured denoised-signal bar | Implemented |
+| `i18n.rs`, `ui/flags/` | Five UI languages and embedded country flags | Implemented |
+| `controls.rs` | Validated local preferences/presets, atomic live strength updates, RMS/peak aggregation | Implemented |
+
+## Data path
+
+```text
+Local installer --7-Zip--> local bundle
+                              |
+Model package + runtime data --+--> validated payload --> named F32 tensors
+                                                        |             |
+                                                   Safetensors    Vulkan buffers
+                                                                      |
+                                                       feature-level network
+                                                               |
+                                                       961 noise-mask values
+                                                               |
+48 kHz WAV --> Hamming / FFT --> mel power / dB features ---------+
+                    |                                          |
+                    +----> apply (1 - strength * noise mask) <--+
+                                      |
+                         inverse FFT / weighted overlap --> mono WAV
+```
+
+The installer is read as an archive. Its executable entry point and virtual-audio
+driver are never invoked. The native loader reads the supported runtime's
+version-specific data layout; it does not load or execute the Windows DLL.
+
+The payload is `weights_v0`: a 10-byte signature followed by repeated little-endian
+name length, UTF-8 name, element count, and IEEE-754 F32 data. Names and dimensions
+are validated before GPU submission. The exported tensor shapes are one-dimensional
+to preserve known data without implying a completed graph specification.
+
+## GPU execution contract
+
+The current backend is `wgpu` over Vulkan. It selects an AMD hardware adapter,
+preferring discrete GPUs. A substring argument can choose another AMD adapter.
+Software Vulkan implementations are excluded from `gpu-check`. This backend uses
+no CUDA, cuDNN, ROCm, or Wine runtime.
+
+Each matrix check uses actual model values with a deterministic input vector. A
+256-lane WGSL workgroup computes each row and reduces its partial sums. Results
+are copied to the host and compared with an F64 CPU dot product. The report states
+that these are isolated operations, not complete denoiser outputs. The measured
+time includes buffer setup, dispatch, synchronization, and readback; it is not an
+audio latency or steady-state inference benchmark.
+
+## Boundaries
+
+- Support is currently limited to the supplied single-segment package variant and
+  compatible 0.5.12.6 runtime layout. Other versions fail with explicit errors.
+- The raw tensor table contains 32 tensors and 15,613,337 F32 parameters.
+- The feature graph uses seven 320-value frames, three convolution/normalization
+  stages, four stateful GRUs, and a 961-output sigmoid projection. It exposes
+  explicit CPU and AMD paths. See `docs/MODEL_CONTRACT.md` for layout details.
+- The audio adapter uses periodic Hamming analysis and synthesis, a sparse Slaney
+  filterbank, clipped log power, and normalized overlap addition. A seven-frame
+  deque retains spectra and features with constant frame-buffer memory. Input,
+  output, and normalization samples remain in memory for offline files.
+- The waveform file path pads 1,440 samples before the first input sample and
+  flushes three trailing frames. It crops the reconstruction to the original
+  sample count. Vendor startup/flush behavior and adaptive strength behavior are
+  not claimed equivalent. Complete audio-output parity has not been established.
+- The Vulkan graph uploads all model parameters at construction and allocates
+  intermediates and bind groups once. Per-step transfers are an 8,960-byte feature
+  context and 3,844-byte output mask. Concatenation, channel reordering, dense bias,
+  and sigmoid stay on the GPU. Isolated operator checks retain their separate
+  upload/readback path for diagnostics.
+- Four candidate recurrent states are copied to committed state only after the
+  mask readback succeeds and all outputs are finite and in range. Rejected input
+  does not advance state. Reset queues GPU buffer clears in submission order.
+- Raw audio streaming uses a 1,920-sample history, a seven-frame context, a
+  1,920-sample overlap buffer, and a matching normalization buffer. It emits hops
+  after six hops of algorithmic delay. EOF pads a partial hop, flushes three audio
+  and three feature frames, and crops to the original sample count. Compute errors
+  end the stream; it must be restarted. The stream creates no audio routes.
+- Vendor model/runtime assets remain external. The built executable embeds only
+  this project's code and WGSL shaders; GTK3 remains a system library.
+- Existing exports are never overwritten. Inspection commands preserve audio
+  settings. `live` captures an explicitly selected source, creates temporary
+  loopback nodes, and feeds them through the native stream child process.
+  `make-default-mic` explicitly selects the virtual source through WirePlumber.
+- The controller owns capture, processor, playback, and loopback children.
+  Scoped signalfd handling catches SIGINT/SIGTERM without native unsafe code.
+  Child signal masks are restored with GNU env; util-linux setpriv installs a
+  parent-death signal. Normal exits, source loss, child failure, and controller
+  death remove the temporary nodes. The source is explicitly targeted and cannot
+  be this application's own virtual input. No service or driver is installed.
+- Virtual node names are stable internal routing identifiers. The user-visible
+  description is the selected physical source description followed by the en-dash
+  suffix ` – audio denoising`.
+
+## Desktop lifecycle
+
+The default command opens the GTK3 window with capture stopped. GTK widgets stay
+on the main thread. Worker threads enumerate devices and read the live child's
+JSON events through a bounded channel; a 100 ms main-loop timer updates the UI.
+The desktop owns a separate `live` child and terminates it on Stop or window close.
+Child lifetime safeguards also apply if the desktop exits unexpectedly.
+
+The main window contains source selection, a strength slider, one denoised signal
+bar, the virtual source description, and explicit start/default-input buttons. A modal
+settings dialog contains the native folder chooser, AMD device and buffering
+options, and named presets. Configuration that requires reconnecting is disabled
+while running. Strength is published atomically to a validated control file and
+read every ten audio hops; changing it preserves the stream and recurrent state.
+
+The header's flag menu applies one of five built-in UI translations immediately.
+Language is a global desktop preference, separate from audio presets; older JSON
+files default to British English. Country flags are original `flag-icons` SVG assets, pinned to the revision in
+`ui/flags/SOURCE.json`, embedded and rendered at 24×18 pixels by GdkPixbuf. The MIT
+notice is stored beside the assets and embedded in the `licenses` CLI command. Device descriptions and the established virtual-source suffix keep
+their original text. Technical backend diagnostics and platform-owned chooser
+content retain their own wording.
+
+Preferences have bounded, versioned JSON storage. Active settings are saved after
+a short debounce. Invalid existing preferences are preserved until an explicit
+save. Presets include source, model folder, device, strength, and buffering.
+Meter events contain RMS and peak values computed from real input/output samples;
+stale readings clear after 600 ms. No signal is inferred from node existence.
+
+## Build lifecycle
+
+`build.sh` builds with a locked dependency set into `.build/`, then publishes the
+executable in `bin/`. `clean_build.sh` builds from scratch in a temporary directory,
+publishes the executable, and removes the temporary directory and this project's
+`.build/` and `target/` directories. It preserves source, documentation, external
+runtime assets, and the existing binary if compilation fails.
+
+`roadmap.html` is the implementation ledger. Its weighted percentages count
+completed functionality only. Validation has its own status and contributes zero
+to implementation progress.
+
+## Distribution packages
+
+The model-free amd64 `.deb` packages share one ELF executable linked against an
+Ubuntu 24.04 sysroot. The build uses isolated pkg-config paths and a GCC sysroot
+wrapper; packaging rejects glibc symbol requirements above 2.39 and any RPATH.
+Debian 13 and Ubuntu 24.04 runtime libraries are checked separately. Mint 22.x
+uses the Ubuntu 24.04 compatibility baseline.
+
+`packaging/package.py` copies an explicit allowlist into the package: executable,
+desktop entry, icon, documentation, lockfile, and component notices. It never
+copies the project's runtime directory or model weights. The packages install no
+services or audio configuration. `/usr/bin` and `/usr/local/bin` executions use
+per-user XDG data storage; portable builds retain project-relative runtime paths.

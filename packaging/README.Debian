@@ -1,0 +1,23 @@
+Clearwave — model-free local packages
+
+Launch “Clearwave” from the application menu, or run clearwave.
+Opening the window does not start microphone capture.
+
+The .deb packages contain the same amd64 executable, built against Ubuntu 24.04
+libraries. They target Debian 13, Ubuntu 24.04 or newer, and Linux Mint 22.x.
+An AMD GPU with a working Vulkan driver and an active PipeWire session is required
+for live denoising. No system service is installed or enabled by this package.
+
+No NVIDIA installer, model, DLL, or exported weights are included. Choose your
+locally supplied extracted model folder in Settings. Files must be obtained and
+used under terms applicable to you. Packaging does not resolve model-use rights.
+
+For /usr/bin installations, settings and optional local runtime assets use:
+  ${XDG_DATA_HOME:-$HOME/.local/share}/clearwave/runtime/
+The settings file is desktop.json; an automatically detected bundle uses vendor/.
+Removing the package preserves this per-user directory.
+
+For manual CLI extraction, install 7zip, then use “clearwave --help”.
+
+Clearwave’s original code is MIT licensed; see LICENSE. For legal reasons,
+NVIDIA model files are not distributed. Obtain NVIDIA RTX Voice separately.

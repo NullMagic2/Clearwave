@@ -1,0 +1,32 @@
+{
+  "collection": "flag-icons",
+  "passed": true,
+  "decoded_sizes": {
+    "pt": [
+      24,
+      18
+    ],
+    "br": [
+      24,
+      18
+    ],
+    "gr": [
+      24,
+      18
+    ],
+    "es": [
+      24,
+      18
+    ],
+    "gb": [
+      24,
+      18
+    ]
+  },
+  "upstream_commit": "ac7e0eb3259eb62aa6100c435607e2fe03896a97",
+  "native_menu_rendered": true,
+  "embedded_mit_notice_verified": true,
+  "binary_sha256": "0ee40c47684553d2b7340febea1b68431ab0fef347e37bd4a1f5b105154a55ea",
+  "default_metadata_unchanged": true,
+  "desktop_icon_theme_override": false
+}

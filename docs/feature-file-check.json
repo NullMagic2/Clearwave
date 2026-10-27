@@ -1,0 +1,23 @@
+{
+  "frames": 4,
+  "gains_per_frame": 961,
+  "max_absolute_error": 9.834766387939453e-07,
+  "finite": true,
+  "passed": true,
+  "cpu": {
+    "adapter": "CPU reference",
+    "elapsed_ms": 1447.9899380000002,
+    "feature_bins": 320,
+    "frames": 4,
+    "gain_bins": 961,
+    "scope": "feature-level inference; audio feature mapping and vendor output parity pending"
+  },
+  "amd": {
+    "adapter": "AMD Radeon RX 7900 XTX (RADV NAVI31)",
+    "elapsed_ms": 114.094031,
+    "feature_bins": 320,
+    "frames": 4,
+    "gain_bins": 961,
+    "scope": "feature-level inference; audio feature mapping and vendor output parity pending"
+  }
+}

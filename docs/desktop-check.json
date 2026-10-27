@@ -1,0 +1,44 @@
+{
+  "passed": true,
+  "version": "0.6.0",
+  "native_window_rendered": true,
+  "toolkit": "GTK 3.24",
+  "start_stop": true,
+  "live_strength": true,
+  "native_settings_dialog": true,
+  "presets_saved_loaded_deleted": true,
+  "reopen_persistence": true,
+  "presets": {
+    "version": 1,
+    "active": {
+      "bundle": "<local-model-bundle>",
+      "source": "desktop-check.source",
+      "adapter": "7900",
+      "strength": 1.0,
+      "latency_ms": 10
+    },
+    "presets": [
+      {
+        "name": "Studio",
+        "settings": {
+          "bundle": "<local-model-bundle>",
+          "source": "desktop-check.source",
+          "adapter": "7900",
+          "strength": 1.0,
+          "latency_ms": 10
+        }
+      }
+    ]
+  },
+  "default_metadata_unchanged": true,
+  "scope": "Native X11 UI exercised with synthetic PipeWire source; physical microphone not captured",
+  "measured_denoised_signal_bar": true,
+  "single_meter_validation_release": {
+    "binary_sha256": "6157078b11e4e2ef05744b588d6bce5624b8c470bf7bfa1148967f4ddc55ad74",
+    "single_full_width_output_meter": true,
+    "synthetic_capture_samples": 24000,
+    "synthetic_capture_rms": 0.0521697923541069,
+    "native_close_status": 0,
+    "control_file_removed": true
+  }
+}

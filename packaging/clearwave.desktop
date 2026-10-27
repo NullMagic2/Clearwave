@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=Clearwave
+Name[pt_PT]=Clearwave
+Name[pt_BR]=Clearwave
+Name[el]=Clearwave
+Name[es]=Clearwave
+Comment=Process a microphone locally with AMD Vulkan
+Exec=clearwave
+Icon=clearwave
+Terminal=false
+Categories=AudioVideo;Audio;GTK;
+StartupNotify=true
+StartupWMClass=Clearwave

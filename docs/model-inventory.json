@@ -1,0 +1,204 @@
+{
+  "format": "NVnn v1 / weights_v0",
+  "full_denoiser_implemented": false,
+  "package_sha256": "ba7fc0fa6d5db24b8a458e64b2bfa8e27a4f5f633fddc07dccb6b284fe06968b",
+  "payload_sha256": "164cc50f711ae8c2becf6e409acb637b86dc638b914fb70af4ae4ad7dad6465d",
+  "runtime_sha256": "c3845f23a9e1859d8a7bb42eb683a2767ecfa3b7f241980d4202655f1c1a1e03",
+  "tensor_count": 32,
+  "tensors": [
+    {
+      "elements": 240,
+      "max": 0.43741631507873535,
+      "min": -1.942649006843567,
+      "name": "conv2d_out1_1_weights"
+    },
+    {
+      "elements": 16,
+      "max": 0.1599203646183014,
+      "min": -0.01623714715242386,
+      "name": "conv2d_out1_1_bias"
+    },
+    {
+      "elements": 16,
+      "max": 1.3476252555847168,
+      "min": 0.8687937259674072,
+      "name": "batch_normalization_1_gamma"
+    },
+    {
+      "elements": 16,
+      "max": 0.2207932025194168,
+      "min": -0.15400263667106628,
+      "name": "batch_normalization_1_beta"
+    },
+    {
+      "elements": 16,
+      "max": 0.1719149500131607,
+      "min": 0.0004922162042930722,
+      "name": "batch_normalization_1_mean"
+    },
+    {
+      "elements": 16,
+      "max": 0.0009219673229381442,
+      "min": 0.000014133762306300923,
+      "name": "batch_normalization_1_var"
+    },
+    {
+      "elements": 5760,
+      "max": 0.35301873087882996,
+      "min": -0.4199884831905365,
+      "name": "conv2d_out2_1_weights"
+    },
+    {
+      "elements": 24,
+      "max": 0.21201974153518677,
+      "min": -0.13740241527557373,
+      "name": "conv2d_out2_1_bias"
+    },
+    {
+      "elements": 24,
+      "max": 1.3950916528701782,
+      "min": 0.7885987758636475,
+      "name": "batch_normalization_2_gamma"
+    },
+    {
+      "elements": 24,
+      "max": 0.44775980710983276,
+      "min": -0.5233644843101501,
+      "name": "batch_normalization_2_beta"
+    },
+    {
+      "elements": 24,
+      "max": 0.637525737285614,
+      "min": 0.046339478343725204,
+      "name": "batch_normalization_2_mean"
+    },
+    {
+      "elements": 24,
+      "max": 0.800549328327179,
+      "min": 0.027459727600216866,
+      "name": "batch_normalization_2_var"
+    },
+    {
+      "elements": 11520,
+      "max": 0.2928086221218109,
+      "min": -0.6684461832046509,
+      "name": "conv2d_out3_1_weights"
+    },
+    {
+      "elements": 32,
+      "max": 0.34508460760116577,
+      "min": -0.40778759121894836,
+      "name": "conv2d_out3_1_bias"
+    },
+    {
+      "elements": 32,
+      "max": 0.05669670179486275,
+      "min": 0.02573171816766262,
+      "name": "batch_normalization_3_gamma"
+    },
+    {
+      "elements": 32,
+      "max": 0.01109241135418415,
+      "min": -0.0034845657646656036,
+      "name": "batch_normalization_3_beta"
+    },
+    {
+      "elements": 32,
+      "max": 0.9675450921058655,
+      "min": 0.04309943690896034,
+      "name": "batch_normalization_3_mean"
+    },
+    {
+      "elements": 32,
+      "max": 1.3237611055374146,
+      "min": 0.054569095373153687,
+      "name": "batch_normalization_3_var"
+    },
+    {
+      "elements": 245760,
+      "max": 0.7327343821525574,
+      "min": -0.6266630291938782,
+      "name": "noise_gru_1_weights"
+    },
+    {
+      "elements": 196608,
+      "max": 1.091877818107605,
+      "min": -1.2468445301055908,
+      "name": "noise_gru_1_rweights"
+    },
+    {
+      "elements": 1536,
+      "max": 0.6918118596076965,
+      "min": -0.7943322062492371,
+      "name": "noise_gru_1_bias"
+    },
+    {
+      "elements": 8060928,
+      "max": 1.4228205680847168,
+      "min": -1.0987299680709839,
+      "name": "noise_denoise_gru_1_1_weights"
+    },
+    {
+      "elements": 196608,
+      "max": 1.585991382598877,
+      "min": -1.7721737623214722,
+      "name": "noise_denoise_gru_1_1_rweights"
+    },
+    {
+      "elements": 1536,
+      "max": 0.702638566493988,
+      "min": -0.6058656573295593,
+      "name": "noise_denoise_gru_1_1_bias"
+    },
+    {
+      "elements": 393216,
+      "max": 1.2553492784500122,
+      "min": -1.6081875562667847,
+      "name": "noise_denoise_gru_2_1_weights"
+    },
+    {
+      "elements": 786432,
+      "max": 1.413319706916809,
+      "min": -1.578705906867981,
+      "name": "noise_denoise_gru_2_1_rweights"
+    },
+    {
+      "elements": 3072,
+      "max": 0.6102012395858765,
+      "min": -0.7507928013801575,
+      "name": "noise_denoise_gru_2_1_bias"
+    },
+    {
+      "elements": 1572864,
+      "max": 1.860305666923523,
+      "min": -1.7438127994537354,
+      "name": "noise_denoise_gru_3_1_weights"
+    },
+    {
+      "elements": 3145728,
+      "max": 2.365215539932251,
+      "min": -3.043994665145874,
+      "name": "noise_denoise_gru_3_1_rweights"
+    },
+    {
+      "elements": 6144,
+      "max": 0.9571651220321655,
+      "min": -1.149323582649231,
+      "name": "noise_denoise_gru_3_1_bias"
+    },
+    {
+      "elements": 984064,
+      "max": 3.9095029830932617,
+      "min": -3.7337043285369873,
+      "name": "noise_denoise_filter_1_weights"
+    },
+    {
+      "elements": 961,
+      "max": 0.40675243735313416,
+      "min": -0.23329374194145203,
+      "name": "noise_denoise_filter_1_bias"
+    }
+  ],
+  "total_parameters": 15613337,
+  "waveform_processing_implemented": true
+}

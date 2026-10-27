@@ -1,0 +1,94 @@
+{
+  "scope": "Isolated weight-matrix operations; full denoiser inference is not implemented",
+  "adapter": {
+    "name": "AMD Radeon RX 7900 XTX (RADV NAVI31)",
+    "vendor": 4098,
+    "device_type": "DiscreteGpu",
+    "backend": "Vulkan",
+    "driver": "radv Mesa 26.0.8-1ubuntu0.3"
+  },
+  "checks": [
+    {
+      "tensor": "noise_gru_1_weights",
+      "rows": 768,
+      "columns": 320,
+      "max_absolute_error": 1.4800037551054857e-7,
+      "max_scaled_error": 1.3719025343693437e-7,
+      "dispatch_and_readback_ms": 2.570633,
+      "passed": true
+    },
+    {
+      "tensor": "noise_gru_1_rweights",
+      "rows": 768,
+      "columns": 256,
+      "max_absolute_error": 1.6820260095862238e-7,
+      "max_scaled_error": 1.2904351379949614e-7,
+      "dispatch_and_readback_ms": 1.465936,
+      "passed": true
+    },
+    {
+      "tensor": "noise_denoise_gru_1_1_weights",
+      "rows": 768,
+      "columns": 10496,
+      "max_absolute_error": 1.2018756621046123e-6,
+      "max_scaled_error": 6.594445025185545e-7,
+      "dispatch_and_readback_ms": 10.859895,
+      "passed": true
+    },
+    {
+      "tensor": "noise_denoise_gru_1_1_rweights",
+      "rows": 768,
+      "columns": 256,
+      "max_absolute_error": 1.5031694799994e-7,
+      "max_scaled_error": 8.449333524497875e-8,
+      "dispatch_and_readback_ms": 1.469897,
+      "passed": true
+    },
+    {
+      "tensor": "noise_denoise_gru_2_1_weights",
+      "rows": 1536,
+      "columns": 256,
+      "max_absolute_error": 2.037999622395148e-7,
+      "max_scaled_error": 1.3223479864929012e-7,
+      "dispatch_and_readback_ms": 1.393578,
+      "passed": true
+    },
+    {
+      "tensor": "noise_denoise_gru_2_1_rweights",
+      "rows": 1536,
+      "columns": 512,
+      "max_absolute_error": 2.971728081391234e-7,
+      "max_scaled_error": 2.501702244970425e-7,
+      "dispatch_and_readback_ms": 1.844115,
+      "passed": true
+    },
+    {
+      "tensor": "noise_denoise_gru_3_1_weights",
+      "rows": 3072,
+      "columns": 512,
+      "max_absolute_error": 3.605444227616772e-7,
+      "max_scaled_error": 2.1631193072456214e-7,
+      "dispatch_and_readback_ms": 2.735139,
+      "passed": true
+    },
+    {
+      "tensor": "noise_denoise_gru_3_1_rweights",
+      "rows": 3072,
+      "columns": 1024,
+      "max_absolute_error": 4.265733197783561e-7,
+      "max_scaled_error": 2.596045360041595e-7,
+      "dispatch_and_readback_ms": 3.35878,
+      "passed": true
+    },
+    {
+      "tensor": "noise_denoise_filter_1_weights",
+      "rows": 961,
+      "columns": 1024,
+      "max_absolute_error": 4.79057077784617e-7,
+      "max_scaled_error": 3.312674377018908e-7,
+      "dispatch_and_readback_ms": 1.978241,
+      "passed": true
+    }
+  ],
+  "passed": true
+}

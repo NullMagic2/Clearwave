@@ -1,0 +1,7 @@
+{
+  "reference": "PyTorch CPU operators",
+  "frames": 4,
+  "max_absolute_error": 2.950429916381836e-06,
+  "passed": true,
+  "scope": "independent implementation of the documented feature graph; vendor audio parity pending"
+}

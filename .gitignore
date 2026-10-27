@@ -1,0 +1,12 @@
+/.build/
+/target/
+/bin/
+/runtime/
+/.clean-build.*/
+
+# Proprietary assets stay local, even if copied outside runtime/.
+*.wpkg
+*.safetensors
+*.dll
+*.exe
+/releases/*.deb

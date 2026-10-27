@@ -1,0 +1,29 @@
+{
+  "before_language_change_serial": 4750,
+  "virtual_description": "Synthetic microphone – audio denoising",
+  "after_language_change_serial": 4750,
+  "route_preserved": true,
+  "passed": true,
+  "languages": [
+    "pt-PT",
+    "pt-BR",
+    "el",
+    "es",
+    "en-GB"
+  ],
+  "menu_flags_rendered": true,
+  "live_label_switching": true,
+  "settings_layouts_checked": [
+    "pt-BR",
+    "el"
+  ],
+  "reopen_language": "pt-BR",
+  "legacy_settings_migration": true,
+  "synthetic_capture_samples": 24000,
+  "synthetic_capture_rms_after_change": 0.04515649005770683,
+  "physical_microphone_captured": false,
+  "default_metadata_unchanged": true,
+  "clean_release_build": true,
+  "language_behavior_build_sha256": "bde05567e61b9c36920e12e55d85f2e502f6f25f234d45baa11a325701fc2159",
+  "final_asset_check": "flag-assets-check.json"
+}

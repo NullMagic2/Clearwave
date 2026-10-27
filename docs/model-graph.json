@@ -1,0 +1,101 @@
+{
+  "input_context": 7,
+  "feature_bins": 320,
+  "output_gains": 961,
+  "layers": [
+    {
+      "name": "conv2d_out1_1",
+      "input": [
+        1,
+        7,
+        320
+      ],
+      "output": [
+        16,
+        5,
+        320
+      ],
+      "operation": "3x5 cross-correlation, frequency padding 2, ReLU, batch normalization epsilon 0.001"
+    },
+    {
+      "name": "conv2d_out2_1",
+      "input": [
+        16,
+        5,
+        320
+      ],
+      "output": [
+        24,
+        3,
+        320
+      ],
+      "operation": "3x5 cross-correlation, frequency padding 2, ReLU, batch normalization epsilon 0.001"
+    },
+    {
+      "name": "conv2d_out3_1",
+      "input": [
+        24,
+        3,
+        320
+      ],
+      "output": [
+        32,
+        1,
+        320
+      ],
+      "operation": "3x5 cross-correlation, frequency padding 2, ReLU, batch normalization epsilon 0.001"
+    },
+    {
+      "name": "noise_gru_1",
+      "input": [
+        320
+      ],
+      "output": [
+        256
+      ],
+      "operation": "stateful reset-after GRU, reset/update/new gates, separate input/recurrent bias"
+    },
+    {
+      "name": "noise_denoise_gru_1_1",
+      "input": [
+        10496
+      ],
+      "output": [
+        256
+      ],
+      "operation": "stateful reset-after GRU, reset/update/new gates, separate input/recurrent bias"
+    },
+    {
+      "name": "noise_denoise_gru_2_1",
+      "input": [
+        256
+      ],
+      "output": [
+        512
+      ],
+      "operation": "stateful reset-after GRU, reset/update/new gates, separate input/recurrent bias"
+    },
+    {
+      "name": "noise_denoise_gru_3_1",
+      "input": [
+        512
+      ],
+      "output": [
+        1024
+      ],
+      "operation": "stateful reset-after GRU, reset/update/new gates, separate input/recurrent bias"
+    },
+    {
+      "name": "noise_denoise_filter_1",
+      "input": [
+        1024
+      ],
+      "output": [
+        961
+      ],
+      "operation": "dense + sigmoid"
+    }
+  ],
+  "layout": "Convolutions NCHW/OIHW; recurrent input is center frame; concatenate recurrent output then frequency-major convolution features",
+  "vendor_output_parity": "not established; offline waveform adapter implemented with documented boundaries"
+}

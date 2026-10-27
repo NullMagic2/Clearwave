@@ -1,0 +1,105 @@
+{
+  "version": "0.4.0",
+  "adapter": "AMD Radeon RX 7900 XTX (RADV NAVI31)",
+  "passed": true,
+  "operator_checks": 28,
+  "operator_max_scaled_error": 8.595907473502461e-07,
+  "resident_parameter_bytes": 62453348,
+  "context_upload_bytes_per_step": 8960,
+  "mask_readback_bytes_per_step": 3844,
+  "feature_frames": 14,
+  "feature_cpu_max_absolute_error": 1.3709068298339844e-06,
+  "waveform_cpu_max_absolute_error": 1.862645149230957e-08,
+  "static_waveform_max_absolute_error_against_v03": 0.0,
+  "static_waveform_identical": true,
+  "baseline": {
+    "adapter": "AMD Radeon RX 7900 XTX (RADV NAVI31)",
+    "audio_seconds": 2.71675,
+    "elapsed_ms": 5224.8204129999995,
+    "frames": 275,
+    "input_channels": 1,
+    "input_rms": 0.036415880776770305,
+    "output_channels": 1,
+    "output_rms": 0.01677413811711342,
+    "output_samples_above_full_scale": 0,
+    "processing_seconds_per_audio_second": 1.9231877843010947,
+    "sample_rate": 48000,
+    "samples": 130404,
+    "scope": "offline waveform processing; vendor output parity, speech quality, and real-time latency are not established",
+    "strength": 1.0
+  },
+  "current": {
+    "adapter": "AMD Radeon RX 7900 XTX (RADV NAVI31)",
+    "audio_seconds": 2.71675,
+    "elapsed_ms": 236.284112,
+    "execution_mode": "resident Vulkan graph",
+    "frames": 275,
+    "input_channels": 1,
+    "input_rms": 0.036415880776770305,
+    "output_channels": 1,
+    "output_rms": 0.01677413811711342,
+    "output_samples_above_full_scale": 0,
+    "processing_seconds_per_audio_second": 0.08697307886261156,
+    "resident_parameter_bytes": 62453348,
+    "sample_rate": 48000,
+    "samples": 130404,
+    "scope": "offline waveform processing; vendor output parity, speech quality, and real-time latency are not established",
+    "strength": 1.0
+  },
+  "speedup": 22.112449156124384,
+  "streams": {
+    "stream-cpu": {
+      "samples": 4807,
+      "max_absolute_error_against_offline": 0.0,
+      "final": {
+        "adapter": "CPU reference",
+        "algorithmic_delay_samples": 2880,
+        "event": "stream_finished",
+        "execution_mode": "CPU reference",
+        "frames": 14,
+        "resident_parameter_bytes": 0,
+        "sample_rate": 48000,
+        "samples": 4807,
+        "scope": "bounded raw float32 stream; wall time includes input/output waits; PipeWire routing is not created",
+        "wall_elapsed_ms": 257.79927200000003
+      }
+    },
+    "stream": {
+      "samples": 4807,
+      "max_absolute_error_against_offline": 0.0,
+      "final": {
+        "adapter": "AMD Radeon RX 7900 XTX (RADV NAVI31)",
+        "algorithmic_delay_samples": 2880,
+        "event": "stream_finished",
+        "execution_mode": "resident Vulkan graph",
+        "frames": 14,
+        "resident_parameter_bytes": 62453348,
+        "sample_rate": 48000,
+        "samples": 4807,
+        "scope": "bounded raw float32 stream; wall time includes input/output waits; PipeWire routing is not created",
+        "wall_elapsed_ms": 29.074925
+      }
+    }
+  },
+  "invalid_raw_samples_rejected": true,
+  "paced_stream": {
+    "samples": 24000,
+    "hop_count": 50,
+    "first_output_before_eof": true,
+    "first_output_after_first_input_hop_ms": 63.64395700074965,
+    "p99_hop_arrival_offset_ms": 63.155706620696584,
+    "final": {
+      "adapter": "AMD Radeon RX 7900 XTX (RADV NAVI31)",
+      "algorithmic_delay_samples": 2880,
+      "event": "stream_finished",
+      "execution_mode": "resident Vulkan graph",
+      "frames": 53,
+      "resident_parameter_bytes": 62453348,
+      "sample_rate": 48000,
+      "samples": 24000,
+      "scope": "bounded raw float32 stream; wall time includes input/output waits; PipeWire routing is not created",
+      "wall_elapsed_ms": 496.977937
+    }
+  },
+  "scope": "Offline throughput and paced raw-pipe transport; no device routing, microphone latency, or speech-quality claim"
+}

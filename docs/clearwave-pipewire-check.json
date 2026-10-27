@@ -1,0 +1,19 @@
+{
+  "passed": true,
+  "version": "0.6.2",
+  "synthetic_source_only": true,
+  "virtual_microphone_media_class": "Audio/Source",
+  "virtual_microphone_description": "pw-loopback-668748 \u2013 audio denoising",
+  "capture_limit_exit_code": 1,
+  "captured_samples": 24000,
+  "captured_rms": 0.027726467698812485,
+  "finite": true,
+  "duration_stop_cleaned_up": true,
+  "sigterm_cleaned_up": true,
+  "parent_death_cleaned_up": true,
+  "source_loss_stops_without_fallback": true,
+  "default_metadata_unchanged": true,
+  "live_stdout": "{\"algorithmic_delay_ms\":60,\"default_changed\":false,\"event\":\"live_started\",\"make_default_command\":\"clearwave make-default-mic\",\"requested_latency_ms\":10,\"source\":{\"description\":\"pw-loopback-668748\",\"id\":197,\"media_class\":\"Audio/Source\",\"name\":\"clearwave-qa.source\",\"serial\":4933,\"virtual_node\":true},\"virtual_microphone\":{\"description\":\"pw-loopback-668748 \u2013 audio denoising\",\"id\":124,\"media_class\":\"Audio/Source\",\"name\":\"clearwave.microphone\",\"serial\":4948,\"virtual_node\":true}}\n{\"default_changed\":false,\"event\":\"live_stopped\"}\n",
+  "live_stderr": "{\"adapter\":\"AMD Radeon RX 7900 XTX (RADV NAVI31)\",\"algorithmic_delay_samples\":2880,\"event\":\"stream_ready\",\"sample_rate\":48000}\n",
+  "scope": "Synthetic signal routed through PipeWire and AMD virtual microphone; physical microphone and default selection were not changed"
+}

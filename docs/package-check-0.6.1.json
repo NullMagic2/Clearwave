@@ -1,0 +1,66 @@
+{
+  "version": "0.6.1",
+  "architecture": "amd64",
+  "maximum_glibc_symbol": "2.39",
+  "packages": {
+    "rtx-voice-amd_0.6.1-1+debian13_amd64.deb": {
+      "sha256_verified": true,
+      "nvidia_files_absent": true,
+      "root_archive_ownership": true,
+      "same_compatible_executable": true,
+      "rust_dependency_notices": 136
+    },
+    "rtx-voice-amd_0.6.1-1+ubuntu24.04_amd64.deb": {
+      "sha256_verified": true,
+      "nvidia_files_absent": true,
+      "root_archive_ownership": true,
+      "same_compatible_executable": true,
+      "rust_dependency_notices": 136
+    },
+    "rtx-voice-amd_0.6.1-1+mint22_amd64.deb": {
+      "sha256_verified": true,
+      "nvidia_files_absent": true,
+      "root_archive_ownership": true,
+      "same_compatible_executable": true,
+      "rust_dependency_notices": 136
+    }
+  },
+  "runtime_checks": {
+    "ubuntu24.04": {
+      "all_linked_libraries_from_target": true,
+      "cli_help": true,
+      "embedded_license": true
+    },
+    "debian13": {
+      "all_linked_libraries_from_target": true,
+      "cli_help": true,
+      "embedded_license": true
+    }
+  },
+  "installed_gui_checks": {
+    "ubuntu24.04": {
+      "native_window": true,
+      "installed_path": "/usr/bin/true (isolated test mount of packaged ELF)",
+      "per_user_settings_saved": true,
+      "exit_status": 0,
+      "stderr": "",
+      "settings_location": "XDG_DATA_HOME/rtx-voice-amd/runtime/desktop.json"
+    },
+    "debian13": {
+      "native_window": true,
+      "installed_path": "/usr/bin/true (isolated test mount of packaged ELF)",
+      "per_user_settings_saved": true,
+      "exit_status": 0,
+      "stderr": "",
+      "settings_location": "XDG_DATA_HOME/rtx-voice-amd/runtime/desktop.json"
+    },
+    "default_metadata_unchanged": true
+  },
+  "apt_dependency_resolution": {
+    "debian13": true,
+    "ubuntu24.04": true,
+    "mint22_ubuntu_base": true
+  },
+  "full_distribution_installations_tested": false,
+  "mint_native_vm_tested": false
+}

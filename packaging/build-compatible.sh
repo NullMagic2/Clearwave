@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+: "${CLEARWAVE_SYSROOT:?Set CLEARWAVE_SYSROOT to an extracted Ubuntu 24.04 amd64 GTK3 development sysroot}"
+: "${CLEARWAVE_BUILD_DIR:?Set CLEARWAVE_BUILD_DIR to a writable intermediate build directory}"
+voice_sysroot="$(realpath -- "$CLEARWAVE_SYSROOT")"
+export CLEARWAVE_SYSROOT="$voice_sysroot"
+export PKG_CONFIG_SYSROOT_DIR="$voice_sysroot"
+export PKG_CONFIG_LIBDIR="$voice_sysroot/usr/lib/x86_64-linux-gnu/pkgconfig:$voice_sysroot/usr/lib/pkgconfig:$voice_sysroot/usr/share/pkgconfig"
+export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER="$project_dir/packaging/sysroot-linker.sh"
+cd -- "$project_dir"
+cargo build --locked --offline --release --target x86_64-unknown-linux-gnu --target-dir "$CLEARWAVE_BUILD_DIR"
+mkdir -p -- "$project_dir/bin"
+install -m 755 -- "$CLEARWAVE_BUILD_DIR/x86_64-unknown-linux-gnu/release/clearwave" "$project_dir/bin/.clearwave.new"
+mv -f -- "$project_dir/bin/.clearwave.new" "$project_dir/bin/clearwave"
+python3 "$project_dir/packaging/package.py"
