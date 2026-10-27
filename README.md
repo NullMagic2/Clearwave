@@ -47,7 +47,7 @@ The interface updates immediately and remembers the selection in desktop setting
 The country flags come from [flag-icons](https://github.com/lipis/flag-icons),
 licensed under MIT. Their original SVGs and attribution are in `ui/flags/`;
 `./bin/clearwave licenses` also displays the embedded copyright notice.
-The settings button opens model folder, AMD device, buffer, and preset controls. The model folder is detected from `runtime/vendor` beside the project.
+The settings button opens model folder, AMD device, buffer, and preset controls. While the folder picker is open, **Cancel** in Settings closes it; you can also enter the model folder path directly. Closing Clearwave stops its folder picker, including an unresponsive one. The model folder is detected from `runtime/vendor` beside the project.
 Active settings are saved locally to `runtime/desktop.json`. Named presets can be
 saved, loaded while stopped, and deleted. Microphone, model, device, and buffer
 selection are locked while processing; strength changes apply without reconnecting

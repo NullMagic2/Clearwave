@@ -4,6 +4,7 @@ mod controls;
 mod desktop;
 mod export;
 mod fft;
+mod folder_picker;
 mod gpu;
 mod i18n;
 mod network;
@@ -51,7 +52,7 @@ impl From<serde_json::Error> for Error {
 }
 pub type Result<T> = std::result::Result<T, Error>;
 
-const HELP: &str = "clearwave 0.6.2 — voice processing on AMD Vulkan and PipeWire
+const HELP: &str = "clearwave 0.6.3 — voice processing on AMD Vulkan and PipeWire
 
 Commands:
   gui [BUNDLE_DIRECTORY] [--settings PREFERENCES.json]
@@ -112,6 +113,7 @@ fn run(args: Vec<PathBuf>) -> Result<()> {
         }
         ("extract", 3) => extract(&args[1], &args[2]),
         ("gui", 1..) => desktop::launch(&args[1..]),
+        ("__pick-model-folder", 5) => folder_picker::run_helper(&args[1..]),
         ("licenses", 1) => {
             println!(
                 "Clearwave\n\n{}\nFlag artwork: flag-icons — https://github.com/lipis/flag-icons\n\n{}",

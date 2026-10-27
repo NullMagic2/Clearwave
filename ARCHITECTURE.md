@@ -126,8 +126,8 @@ The desktop owns a separate `live` child and terminates it on Stop or window clo
 Child lifetime safeguards also apply if the desktop exits unexpectedly.
 
 The main window contains source selection, a strength slider, one denoised signal
-bar, the virtual source description, and explicit start/default-input buttons. A modal
-settings dialog contains the native folder chooser, AMD device and buffering
+bar, the virtual source description, and explicit start/default-input buttons. A non-modal
+settings dialog launches the isolated GTK folder chooser, AMD device and buffering
 options, and named presets. Configuration that requires reconnecting is disabled
 while running. Strength is published atomically to a validated control file and
 read every ten audio hops; changing it preserves the stream and recurrent state.
@@ -171,3 +171,15 @@ desktop entry, icon, documentation, lockfile, and component notices. It never
 copies the project's runtime directory or model weights. The packages install no
 services or audio configuration. `/usr/bin` and `/usr/local/bin` executions use
 per-user XDG data storage; portable builds retain project-relative runtime paths.
+
+## Folder picker isolation
+
+GTK widgets remain on the main thread of their own process. Model-folder
+browsing uses a dedicated GTK helper process, supervised by the
+`model-folder-picker` worker thread. The application polls a bounded result
+channel without waiting on the helper. Local filesystem browsing stays in the
+helper, so a blocked dialog cannot block the main window. The Settings Browse
+button becomes Cancel while a picker is active. Cancel, hiding Settings, or
+closing Clearwave signals the worker to kill and reap the owned helper; parent
+death also kills the helper. Settings is non-modal so the main window remains closable. Returned paths use
+a bounded JSON protocol.

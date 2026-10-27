@@ -147,6 +147,7 @@ pub fn launch(args: &[PathBuf]) -> Result<()> {
     });
     gtk::main();
     timer.remove();
+    app.borrow_mut().picker.take();
     app.borrow_mut().live.take();
     app.borrow_mut().save(false);
     Ok(())
@@ -162,6 +163,7 @@ struct Desktop {
     sender: SyncSender<Event>,
     events: Receiver<Event>,
     live: Option<Live>,
+    picker: Option<crate::folder_picker::FolderPicker>,
     output: Meter,
     last_levels: Option<Instant>,
     output_name: String,
@@ -197,6 +199,7 @@ impl Desktop {
             sender,
             events,
             live: None,
+            picker: None,
             output: Meter::default(),
             last_levels: None,
             output_name: String::new(),
@@ -327,6 +330,27 @@ impl Desktop {
         Ok(())
     }
     fn events(&mut self) {
+        if let Some(result) = self.picker.as_ref().and_then(|picker| picker.poll()) {
+            self.picker.take();
+            match result {
+                Ok(Some(path)) => {
+                    self.preferences.active.bundle = path.to_string_lossy().into_owned();
+                    self.revision += 1;
+                    self.changed();
+                    self.message = None;
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    self.message = Some((
+                        true,
+                        format!(
+                            "{}: {error}",
+                            self.preferences.language.text(Text::PickerError)
+                        ),
+                    ))
+                }
+            }
+        }
         while let Ok(event) = self.events.try_recv() {
             match event {
                 Event::Sources(Ok(mut sources)) => {
@@ -612,7 +636,7 @@ impl Interface {
         let settings = gtk::Dialog::with_buttons(
             Some("Settings"),
             Some(&window),
-            gtk::DialogFlags::MODAL,
+            gtk::DialogFlags::DESTROY_WITH_PARENT,
             &[("Close", gtk::ResponseType::Close)],
         );
         settings.set_default_size(580, 460);
@@ -826,7 +850,15 @@ impl Interface {
         } else {
             language.text(Text::Start)
         });
-        self.start.set_sensitive(live.is_none_or(|l| !l.stopping));
+        self.start
+            .set_sensitive(state.picker.is_none() && live.is_none_or(|l| !l.stopping));
+        self.browse
+            .set_label(language.text(if state.picker.is_some() {
+                Text::Cancel
+            } else {
+                Text::Browse
+            }));
+        self.bundle.set_editable(state.picker.is_none());
         self.source.set_sensitive(live.is_none());
         self.refresh.set_sensitive(live.is_none());
         self.configuration.set_sensitive(live.is_none());
@@ -910,6 +942,7 @@ impl Interface {
         self.window.connect_delete_event(move |_, _| {
             if let Some(state) = weak.upgrade() {
                 let mut state = state.borrow_mut();
+                state.picker.take();
                 state.live.take();
                 state.save(false);
             }
@@ -994,31 +1027,39 @@ impl Interface {
                 state.changed();
             }
         });
-        let entry = self.bundle.clone();
-        let parent = self.settings.clone();
         let weak = Rc::downgrade(state);
         self.browse.connect_clicked(move |_| {
             let Some(state) = weak.upgrade() else {
                 return;
             };
-            let language = state.borrow().preferences.language;
-            let chooser = gtk::FileChooserNative::new(
-                Some(language.text(Text::FolderTitle)),
-                Some(&parent),
-                gtk::FileChooserAction::SelectFolder,
-                Some(language.text(Text::Select)),
-                Some(language.text(Text::Cancel)),
-            );
-            chooser.set_filename(entry.text().as_str());
-            let entry = entry.clone();
-            glib::MainContext::default().spawn_local(async move {
-                if chooser.run_future().await == gtk::ResponseType::Accept {
-                    if let Some(path) = chooser.filename() {
-                        entry.set_text(&path.to_string_lossy());
-                    }
+            let mut state = state.borrow_mut();
+            if state.picker.take().is_some() {
+                return;
+            }
+            match crate::folder_picker::FolderPicker::start(
+                PathBuf::from(&state.preferences.active.bundle),
+                state.preferences.language,
+            ) {
+                Ok(picker) => {
+                    state.picker = Some(picker);
+                    state.message = None;
                 }
-                chooser.destroy();
-            });
+                Err(error) => {
+                    state.message = Some((
+                        true,
+                        format!(
+                            "{}: {error}",
+                            state.preferences.language.text(Text::PickerError)
+                        ),
+                    ))
+                }
+            }
+        });
+        let weak = Rc::downgrade(state);
+        self.settings.connect_hide(move |_| {
+            if let Some(state) = weak.upgrade() {
+                state.borrow_mut().picker.take();
+            }
         });
 
         let weak = Rc::downgrade(state);

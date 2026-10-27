@@ -1,0 +1,16 @@
+{
+  "version": "0.6.3",
+  "gtk_folder_selection_and_persistence": true,
+  "missing_initial_folder_falls_back": true,
+  "dedicated_worker_thread": true,
+  "isolated_gtk_helper_process": true,
+  "ui_cancel_while_helper_sigstopped": true,
+  "cancel_ms_including_test_click_delay": 303,
+  "settings_close_cancels_stopped_helper": true,
+  "graceful_app_close_with_stopped_helper": true,
+  "graceful_close_ms": 16,
+  "parent_death_kills_stopped_helper": true,
+  "scope": "Native X11 GTK UI, local folder selection, and deliberately SIGSTOP-frozen chooser; no physical audio capture.",
+  "original_desktop_spin_reproduced_in_isolated_display": false,
+  "frozen_helper_injection": "SIGSTOP before Cancel, Settings close, graceful app close, and parent death"
+}

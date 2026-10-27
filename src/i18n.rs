@@ -93,6 +93,7 @@ catalog! {
     Automatic => ["Automatic selection", "Seleção automática", "Seleção automática", "Αυτόματη επιλογή", "Selección automática"],
     Peak => ["Peak", "Pico", "Pico", "Κορυφή", "Pico"],
     NoMeasured => ["No measured signal", "Sem sinal medido", "Sem sinal medido", "Δεν μετρήθηκε σήμα", "Sin señal medida"],
+    PickerError => ["Could not select the model folder", "Não foi possível selecionar a pasta do modelo", "Não foi possível selecionar a pasta do modelo", "Δεν ήταν δυνατή η επιλογή του φακέλου μοντέλου", "No se pudo seleccionar la carpeta del modelo"],
     FolderTitle => ["Select model folder", "Selecionar pasta do modelo", "Selecionar pasta do modelo", "Επιλογή φακέλου μοντέλου", "Seleccionar carpeta del modelo"],
     Select => ["Select", "Selecionar", "Selecionar", "Επιλογή", "Seleccionar"],
     Cancel => ["Cancel", "Cancelar", "Cancelar", "Ακύρωση", "Cancelar"],

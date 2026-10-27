@@ -129,3 +129,25 @@ The publication build embeds Clearwave’s MIT license in `licenses`; all three
 packages include the same LICENSE and retain 136 Rust dependency notices.
 Package hashes, binary identity, root ownership, and exclusion of NVIDIA files
 were checked again after this licensing-only update.
+
+## Responsive folder picker — 0.6.3
+
+All 27 Rust tests pass, including bounded folder-selection protocol validation
+and cancellation reaping the owned child. The folder picker now runs as a
+separate GTK process supervised by a worker thread, and Settings is non-modal.
+The main GTK thread does not wait for the chooser process or perform its folder
+browsing.
+
+The native X11 regression selected and persisted a real local model folder,
+then deliberately froze chooser helpers with SIGSTOP. Cancel removed the frozen
+helper in 303 ms including the test's 200 ms click delay; Settings close also
+cancelled it. The main window closed normally in 16 ms with a frozen helper,
+and killing the application also killed its stopped helper. Startup and
+preference migration passed with the Ubuntu 24.04 and Debian 13 runtime roots.
+The original desktop's CPU spin did not reproduce in the isolated display; the
+fault-injection check establishes cancellation and shutdown behavior even if a
+chooser hangs. See `folder-picker-check.json`.
+
+The development style guide is excluded from source release archives through
+`.gitattributes`; the existing 0.6.2 local and GitHub ZIPs were checked after
+refreshing archive metadata. Binary package allowlists already exclude it.
