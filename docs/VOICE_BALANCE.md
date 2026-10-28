@@ -1,11 +1,17 @@
 # Default microphone voice balance
 
-Version 0.7.1-dev.5 uses `balanced-v1` voicing for microphone output on Linux and
-Windows, and for the regular `denoise` / `denoise-cpu` commands. It is automatic;
-there is no new setting. Existing preferences stay compatible.
+Version 0.7.1-dev.7 exposes the existing `balanced-v1` voice EQ as a live **Bass**
+slider on Linux and Windows. Its range is -6 to +6 dB in 0.5 dB steps, centred at
+180 Hz with Q 0.8. The default stays +2.5 dB, matching earlier versions; 0 dB is
+neutral EQ, while peak protection remains active. Saved preferences and worker
+control messages include `bass_db`; old files without it use +2.5 dB.
 
-The shared safe Rust stage applies a modest +2.5 dB peaking EQ at 180 Hz, Q 0.8,
-after denoising, waveform reconstruction and Broadcast output compensation.
+The shared safe Rust stage runs after denoising, waveform reconstruction and
+Broadcast output compensation. Changed filter coefficients interpolate over 960
+samples (20 ms at 48 kHz), retaining filter history. Repeated unchanged control
+messages do not restart the ramp. GUI controls do not perform audio calculations.
+The regular `denoise` / `denoise-cpu` commands retain the default +2.5 dB profile.
+
 It follows the peaking-filter equations in the
 [W3C Audio EQ Cookbook](https://www.w3.org/TR/audio-eq-cookbook/).
 DC and high frequencies have unity limiting response; unlike a low shelf, it
@@ -45,7 +51,9 @@ microphone stream. Output meters measure the final voiced/guarded samples.
 
 Tests measure the bass/treble/rumble response with actual tones, exact filter
 state continuity across arbitrary chunk boundaries, peak bounds, silence and
-nonfinite input handling. A sustained-harmonic counterexample checks the echo
+nonfinite input handling. Additional checks measure signed bass gain, validate saved
+settings and old-file defaults, and compare coefficient transitions across chunk
+sizes. The Windows UI test exercises negative, zero and positive slider values. A sustained-harmonic counterexample checks the echo
 protection bound. Both model profiles are checked for offline/live agreement,
 including enabled echo reduction and a partial final chunk. These checks
 establish processing behavior; listening quality remains subjective.

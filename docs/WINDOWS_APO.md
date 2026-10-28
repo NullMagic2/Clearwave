@@ -34,11 +34,20 @@ with separate model state and GPU resources.
 ## Setup and removal
 
 Extract the complete Windows archive, including `clearwave_apo.dll` and
-`setup-apo.ps1`. Select the microphone and click **Set up microphone processing…**.
-The explicit setup requires administrator approval. Reopen recording applications
-(or restart Windows if the audio graph remains loaded), enable microphone audio
-enhancements, and click **Start**. A ready worker alone does not prove Windows
+`setup-apo.ps1`. Select the microphone and click **Start**. If registration is
+missing, a short **Yes / Cancel** dialog offers setup. The manual setup button
+opens the same dialog. **Yes** requests administrator approval; installation
+runs outside the UI thread and reports its result. After successful setup,
+Start resumes. Reopen recording applications (or restart Windows if the audio
+graph remains loaded) and enable microphone audio enhancements.
+A ready worker alone does not prove Windows
 loaded the effect; check the signal meter while an app records that microphone.
+
+The worker checks the elevated process exit code, a request-matched JSON result
+under Program Files, and endpoint registration before reporting success. Closing
+Clearwave stops monitoring; an elevated installation can still finish or roll
+back. The packaged script runs with a process-scoped PowerShell execution-policy
+bypass; no persistent policy or protected-audio setting is changed.
 
 The development script copies the DLL into a hash-specific directory under
 Program Files, records the original registry values before changes, and attaches

@@ -62,3 +62,23 @@ try {
     Remove-Item -LiteralPath $temporary -ErrorAction SilentlyContinue
 }
 Write-Output 'Setup parser and recovery tests passed; no real registry changes performed.'
+
+$root = Join-Path ([IO.Path]::GetTempPath()) ('clearwave-setup-report-' + [guid]::NewGuid().ToString('N'))
+$Endpoint = '{a183f262-9999-4333-9222-f85e794501cc}'
+$RequestId = 'abc-123'
+try {
+    Write-SetupResult $false 'Access denied to microphone settings'
+    $path = Join-Path $root "setup-$Endpoint.json"
+    $bytes = [IO.File]::ReadAllBytes($path)
+    if ($bytes[0] -ne [byte][char]'{') { throw 'Setup report has a BOM or invalid JSON prefix.' }
+    $report = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+    if ($report.request_id -ne $RequestId -or $report.success -or $report.message -ne 'Access denied to microphone settings') {
+        throw 'Setup failure report lost the request or error.'
+    }
+    Write-SetupResult $true 'Configured'
+    $report = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+    if (-not $report.success -or $report.request_id -ne $RequestId) { throw 'Setup success did not replace the previous result.' }
+} finally {
+    Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+}
+Write-Output 'Setup success/failure reporting tests passed.'

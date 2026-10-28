@@ -1,16 +1,18 @@
 {
-  "version": "0.7.1-dev.6",
+  "version": "0.7.1-dev.7",
   "stage": "unsigned Windows APO development preview",
   "tests": {
-    "linux_shared_and_bridge_passed": 64,
-    "windows_wine_passed": 65,
+    "linux_shared_and_bridge_passed": 65,
+    "windows_wine_passed": 70,
     "windows_preview_ignored": 1,
-    "setup_parser_and_recovery": "passed with in-memory registry",
+    "setup_parser_and_recovery": "passed with in-memory registry; success/failure JSON reporting checked",
     "windows_clippy": "passed",
     "linux_clippy": "passed",
     "archive_contents": "passed",
     "apo_exports": "passed",
-    "apo_embedded_manifest": false
+    "apo_embedded_manifest": false,
+    "gtk_dummy_preview": "Passed; labels and track left edges both at x=41; signed half-decibel snapping passed",
+    "automatic_setup_dialog": "passed in Wine for all five languages; Yes/Cancel button text and cancel behavior checked"
   },
   "source_readme_unchanged": true,
   "windows_playback_route_removed": true,
@@ -25,6 +27,15 @@
     "Real-time page residency and stress behavior",
     "End-to-end processed capture on physical Windows hardware"
   ],
-  "package": "clearwave-0.7.1-dev.6-windows-x86_64.zip",
-  "sha256": "11f43bc4c3a78f2f939a02b1c7b52af8adeb67f873f0690968958c66fceebf79"
+  "package": "clearwave-0.7.1-dev.7-windows-x86_64.zip",
+  "sha256": "7445678e5c9477b0c6998b0471e6337a7013209d6edd3a50e56a9cc86c53619a",
+  "bass_control": {
+    "minimum_db": -6,
+    "maximum_db": 6,
+    "step_db": 0.5,
+    "default_db": 2.5,
+    "centre_hz": 180,
+    "transition_ms": 20,
+    "saved": true
+  }
 }

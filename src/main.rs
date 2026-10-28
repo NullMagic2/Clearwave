@@ -468,6 +468,7 @@ fn stream_audio(args: &[PathBuf], cpu: bool) -> Result<()> {
                 Ok(next) => {
                     strength = next.strength;
                     processor.set_echo_reduction(next.echo_reduction)?;
+                    processor.set_bass(next.bass_db)?;
                 }
                 Err(e) => eprintln!(
                     "{}",

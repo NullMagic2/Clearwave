@@ -3,6 +3,7 @@
 //! Model loading, DSP and WASAPI stream callbacks remain safe Rust.
 pub mod audio;
 pub mod desktop;
+pub mod setup;
 pub mod task;
 
 use crate::{Error, Result};

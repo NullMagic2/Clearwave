@@ -1,11 +1,11 @@
 {
-  "version": "0.7.1-dev.6",
+  "version": "0.7.1-dev.7",
   "linux_tests": {
-    "passed": 64,
+    "passed": 65,
     "failed": 0
   },
   "windows_wine_tests": {
-    "passed": 65,
+    "passed": 70,
     "failed": 0,
     "ignored_opt_in_preview": 1
   },
@@ -13,24 +13,24 @@
   "maximum_glibc_symbol": "2.39",
   "voice_balance_profile": "balanced-v1",
   "packages": {
-    "clearwave_0.7.1-dev.6-1+debian13_amd64.deb": {
-      "sha256": "8f2f02e7b6626d4ff7831a52ff5055cf42bb9665cf6f9fa9cd5921adc87d6d24",
+    "clearwave_0.7.1-dev.7-1+debian13_amd64.deb": {
+      "sha256": "8804e0844301efd3014f9a79dafda6357bd09965ea0a452726433762122b3a3c",
       "binary_matches": true,
       "cli_smoke_test": true,
       "nvidia_assets_absent": true,
       "private_audio_absent": true,
       "style_guide_absent": true
     },
-    "clearwave_0.7.1-dev.6-1+ubuntu24.04_amd64.deb": {
-      "sha256": "23493da9d10ad07c7cfee5878eb8fb5e5319031c47a4d0ee38646310224b5c84",
+    "clearwave_0.7.1-dev.7-1+ubuntu24.04_amd64.deb": {
+      "sha256": "186ccf213ba441e29533baa184e5003c4a45368422a694a984371e340af99ff4",
       "binary_matches": true,
       "cli_smoke_test": true,
       "nvidia_assets_absent": true,
       "private_audio_absent": true,
       "style_guide_absent": true
     },
-    "clearwave_0.7.1-dev.6-1+mint22_amd64.deb": {
-      "sha256": "759e63ded3df2a00884d342a297ff95268921660e86d055e2f61925c03b8e9ba",
+    "clearwave_0.7.1-dev.7-1+mint22_amd64.deb": {
+      "sha256": "fd81df9e42b12e797e0f0858e06f3123348c6f4c4b8cd91e7a99be48f5a8ef89",
       "binary_matches": true,
       "cli_smoke_test": true,
       "nvidia_assets_absent": true,
@@ -39,20 +39,35 @@
     }
   },
   "windows_package": {
-    "version": "0.7.1-dev.6",
+    "version": "0.7.1-dev.7",
     "architecture": "x86_64",
     "target": "x86_64-pc-windows-gnu",
-    "filename": "clearwave-0.7.1-dev.6-windows-x86_64.zip",
-    "sha256": "11f43bc4c3a78f2f939a02b1c7b52af8adeb67f873f0690968958c66fceebf79",
+    "filename": "clearwave-0.7.1-dev.7-windows-x86_64.zip",
+    "sha256": "7445678e5c9477b0c6998b0471e6337a7013209d6edd3a50e56a9cc86c53619a",
     "windows_audio": "capture-apo-preview",
     "native_audio_host_verified": false,
-    "apo_sha256": "f323fe025e097a11ab85a9d7a0224617dfb174ec39f0275e5550fbaca3242c20",
-    "binary_sha256": "6ae0cdefc93b28b920dc7622fa63e4b7ec89408169a40c49842c9cda82245be6",
+    "apo_sha256": "ee531d3e246e58528612f80bad1de97011b389497d38fed70dc8413ff1e35efb",
+    "binary_sha256": "406451e665b0e09b8969031867b5b4e555da47412447c041d6455d4eda5b29c5",
     "rust_dependency_notices": 114,
     "nvidia_assets_included": false,
     "style_guide_included": false
   },
   "physical_windows_audio_verified": false,
   "windows_apo_validation": "windows-apo-validation.json",
-  "scope": "Package and code checks do not establish subjective speech quality, native Windows APO loading, or general NVIDIA output equivalence."
+  "scope": "Package and code checks do not establish subjective speech quality, native Windows APO loading, or general NVIDIA output equivalence.",
+  "gtk_slider_preview_passed": true,
+  "bass_control": {
+    "minimum_db": -6,
+    "maximum_db": 6,
+    "default_db": 2.5,
+    "transition_ms": 20,
+    "settings_compatibility_passed": true
+  },
+  "windows_setup_dialog": {
+    "start_offers_setup": true,
+    "affirmative_button": "Yes",
+    "cancel_never_starts_audio": true,
+    "all_five_languages_checked": true,
+    "native_elevation_verified": false
+  }
 }

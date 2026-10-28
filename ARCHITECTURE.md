@@ -52,11 +52,13 @@ conversion is local to inference; export preserves original stored values.
 
 ## Data path
 
-Microphone output applies the fixed `balanced-v1` voicing profile after waveform
+Microphone output applies the shared `balanced-v1` voicing profile after waveform
 reconstruction and input-gain compensation. A +2.5 dB peaking EQ at 180 Hz adds
 voice body, with near-unity DC/treble response and a soft guard above 0.98 full
 scale. Linux, Windows and normal offline denoising share this implementation.
-There is no additional UI control or preference. Low-frequency echo prediction
+A saved Bass slider controls the 180 Hz EQ from -6 to +6 dB, defaulting to +2.5 dB.
+Live changes interpolate coefficients over 20 ms in the audio worker. Older
+preferences/control files retain the default gain. Low-frequency echo prediction
 is reduced to protect sustained voice harmonics. Reference commands omit the
 final EQ/guard; neural features, weights and masks are unchanged.
 See [voice balance](docs/VOICE_BALANCE.md) for scope and validation.
@@ -283,6 +285,11 @@ cable is used. The APO callback never waits for inference and uses timestamped d
 fallback when the worker cannot supply an on-time result. Its fixed 120 ms delay
 is reported to the audio host. See [Windows APO](docs/WINDOWS_APO.md) for supported
 formats, setup/removal, signing limits and native-host validation gaps.
+
+The setup worker monitors the elevated installer without blocking the UI. It
+checks a request-matched result, process exit code and endpoint registration.
+Start offers setup when registration is missing, then resumes after success.
+Closing the UI cancels monitoring without interrupting registry rollback.
 
 Discovery, picker and inference children belong to kill-on-close Windows jobs.
 The UI never joins audio or GPU threads. Active settings are saved atomically to

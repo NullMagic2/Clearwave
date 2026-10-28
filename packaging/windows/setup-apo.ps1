@@ -8,7 +8,8 @@ It never installs a kernel driver, enables test mode, or changes audio protectio
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][ValidatePattern('^\{[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\}$')][string]$Endpoint,
-    [ValidateSet('Install', 'Uninstall')][string]$Action = 'Install'
+    [ValidateSet('Install', 'Uninstall')][string]$Action = 'Install',
+    [ValidatePattern('^[0-9a-f-]{1,64}$')][string]$RequestId = ''
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -80,6 +81,19 @@ function Restore($Changes) {
     }
 }
 
+function Write-SetupResult([bool]$Success, [string]$Message) {
+    if ([string]::IsNullOrEmpty($RequestId)) { return }
+    $maximumMessageCharacters = 2048
+    if ($Message.Length -gt $maximumMessageCharacters) { $Message = $Message.Substring(0, $maximumMessageCharacters) }
+    New-Item -ItemType Directory -Path $root -Force | Out-Null
+    $path = Join-Path $root "setup-$Endpoint.json"
+    $temporary = Join-Path $root "setup-$Endpoint-$RequestId.tmp"
+    $json = @{request_id = $RequestId; success = $Success; message = $Message} | ConvertTo-Json -Compress
+    [IO.File]::WriteAllText($temporary, $json, [Text.UTF8Encoding]::new($false))
+    Move-Item -LiteralPath $temporary -Destination $path -Force
+}
+
+function Invoke-Setup {
 if ($Action -eq 'Uninstall') {
     if (-not (Test-Path -LiteralPath $stateFile)) { throw 'No saved installation exists for this microphone.' }
     $state = Import-Clixml -LiteralPath $stateFile
@@ -91,7 +105,7 @@ if ($Action -eq 'Uninstall') {
         Remove-Item -LiteralPath $globalFile
     }
     Write-Output 'Clearwave detached. Reopen recording apps; restart Windows if the old audio graph remains loaded.'
-    exit 0
+    return
 }
 
 $endpointKey = $machine.OpenSubKey($capture)
@@ -176,3 +190,15 @@ Write-Output 'Registered for this microphone. Use 48000 Hz mono/stereo and enabl
 Write-Output 'Reopen recording apps (or restart Windows), then click Start in Clearwave. Select the original microphone in other apps.'
 Write-Output 'Registration does not prove Windows loaded the APO. Check that the Clearwave signal bar responds while an app records.'
 Write-Output "Undo: .\setup-apo.ps1 -Action Uninstall -Endpoint '$Endpoint'"
+
+}
+try {
+    Invoke-Setup
+    Write-SetupResult $true 'Microphone processing registered.'
+    exit 0
+} catch {
+    $message = $_.Exception.Message
+    try { Write-SetupResult $false $message } catch { Write-Error $_ -ErrorAction Continue }
+    Write-Error $message -ErrorAction Continue
+    exit 1
+}

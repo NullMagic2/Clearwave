@@ -1,20 +1,19 @@
-# Clearwave 0.7.1-dev.6 — Linux packages
+# Clearwave 0.7.1-dev.7 — Linux packages
 
-**Experimental audio processing.** This build includes automatic microphone voice
-balance and a revised echo-reduction stage that preserves spectral phase and
-only attenuates existing frequency bins. Echo reduction still defaults to off;
-its perceptual quality is not established by these checks. No additional voice
-balance setting is needed. The neural model path is unchanged; `denoise-reference`
-bypasses the final voicing for neutral model comparisons. Native NVIDIA hardware
-equivalence and physical-device latency remain unverified.
+**Experimental audio processing.** This build aligns the Linux slider headings
+with the themed tracks and adds a saved, live **Bass** control from -6 to +6 dB
+in 0.5 dB steps. It adjusts the existing 180 Hz voice EQ after denoising; +2.5 dB
+preserves the previous default and 0 dB is neutral EQ. Changes ramp over 20 ms.
+Noise removal and echo reduction retain their independent controls. Native NVIDIA
+hardware equivalence and physical-device latency remain unverified.
 
 Download the matching **amd64 / x86-64** package:
 
 | Distribution | File |
 | --- | --- |
-| Debian 13 | `clearwave_0.7.1-dev.6-1+debian13_amd64.deb` |
-| Ubuntu 24.04 LTS or newer | `clearwave_0.7.1-dev.6-1+ubuntu24.04_amd64.deb` |
-| Linux Mint 22.x | `clearwave_0.7.1-dev.6-1+mint22_amd64.deb` |
+| Debian 13 | `clearwave_0.7.1-dev.7-1+debian13_amd64.deb` |
+| Ubuntu 24.04 LTS or newer | `clearwave_0.7.1-dev.7-1+ubuntu24.04_amd64.deb` |
+| Linux Mint 22.x | `clearwave_0.7.1-dev.7-1+mint22_amd64.deb` |
 
 The three packages contain the same compatible executable. They are local,
 unsigned builds. Older distribution releases and ARM processors are not targeted.
@@ -22,7 +21,7 @@ unsigned builds. Older distribution releases and ARM processors are not targeted
 From the directory containing your download, install its exact filename:
 
 ```sh
-sudo apt install ./clearwave_0.7.1-dev.6-1+ubuntu24.04_amd64.deb
+sudo apt install ./clearwave_0.7.1-dev.7-1+ubuntu24.04_amd64.deb
 ```
 
 Substitute the Debian or Mint filename as appropriate. APT installs the declared

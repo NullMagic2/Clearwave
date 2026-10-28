@@ -227,6 +227,7 @@ fn process_client(
             control = ProcessingControl::read(control_path)?;
         }
         processor.set_echo_reduction(control.echo_reduction)?;
+        processor.set_bass(control.bass_db)?;
         let output = processor.push(&input.samples, control.strength, &mut |features| {
             network.step(features)
         })?;
@@ -253,47 +254,4 @@ fn process_client(
             );
         }
     }
-}
-
-pub fn setup(endpoint: &str) -> Result<()> {
-    let guid =
-        protocol::endpoint_guid(endpoint).ok_or_else(|| Error::new("Choose a microphone first"))?;
-    let directory = std::env::current_exe()?
-        .parent()
-        .ok_or_else(|| Error::new("Missing application directory"))?
-        .to_path_buf();
-    let script = directory.join("setup-apo.ps1");
-    if !script.is_file() {
-        return Err(Error::new(
-            "setup-apo.ps1 is missing. Extract the complete Windows package.",
-        ));
-    }
-    let parameters = wide(format!(
-        "-NoProfile -NoExit -File \"{}\" -Endpoint \"{}\" -Action Install",
-        script.display(),
-        guid
-    ));
-    // SAFETY: Windows owns the elevated setup process and its confirmation dialog.
-    // Arguments contain a validated GUID and a quoted Windows file path only.
-    // Setup runs explicitly from the button, never during discovery or capture.
-    unsafe {
-        use ::windows::{
-            Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL},
-            core::w,
-        };
-        let result = ShellExecuteW(
-            None,
-            w!("runas"),
-            w!("powershell.exe"),
-            PCWSTR(parameters.as_ptr()),
-            None,
-            SW_SHOWNORMAL,
-        );
-        if result.0 as isize <= 32 {
-            return Err(Error::new(
-                "Microphone setup was cancelled or could not start",
-            ));
-        }
-    }
-    Ok(())
 }

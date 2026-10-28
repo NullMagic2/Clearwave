@@ -10,6 +10,7 @@ use crate::{
     },
     gpu::AdapterInfo,
     i18n::{Language, Text},
+    voice_balance::{BASS_STEP_DB, MAX_BASS_DB, MIN_BASS_DB},
 };
 use ::windows::{
     Win32::{
@@ -52,6 +53,10 @@ const SETTINGS: u16 = 109;
 const LANGUAGE: u16 = 110;
 const STATUS: u16 = 111;
 const ROUTE_HINT: u16 = 112;
+const BASS: u16 = 113;
+const BASS_VALUE: u16 = 114;
+const BASS_LABEL: u16 = 115;
+const BASS_UNITS_PER_DB: f32 = 1.0 / BASS_STEP_DB;
 const SUBTITLE: u16 = 121;
 const SOURCE_LABEL: u16 = 130;
 const STRENGTH_LABEL: u16 = 132;
@@ -78,7 +83,7 @@ const FLAG_HEIGHT: i32 = 18;
 const FLAG_FIRST_RESOURCE: usize = 301;
 const APP_ICON_RESOURCE: usize = 1;
 const MAIN_WIDTH: i32 = 680;
-const MAIN_HEIGHT: i32 = 690;
+const MAIN_HEIGHT: i32 = 780;
 const SETTINGS_WIDTH: i32 = 640;
 const SETTINGS_HEIGHT: i32 = 460;
 const MARGIN: i32 = 24;
@@ -120,6 +125,11 @@ impl Drop for Live {
         self.process.stop(Some(self.control.clone()));
     }
 }
+struct SetupRun {
+    task: super::setup::SetupTask,
+    source: String,
+    start_after: bool,
+}
 struct App {
     windows: OwnedWindows,
     controls: BTreeMap<u16, HWND>,
@@ -136,6 +146,7 @@ struct App {
     receiver: Receiver<Event>,
     live: Option<Live>,
     picker: Option<OwnedChild>,
+    setup: Option<SetupRun>,
     running: bool,
     levels_at: Option<Instant>,
     message: String,
@@ -327,6 +338,7 @@ impl App {
             receiver,
             live: None,
             picker: None,
+            setup: None,
             running: false,
             levels_at: None,
         };
@@ -341,6 +353,8 @@ impl App {
             PERCENT,
             ECHO_LABEL,
             ECHO_PERCENT,
+            BASS_LABEL,
+            BASS_VALUE,
             STATUS,
             ROUTE_HINT,
         ] {
@@ -401,9 +415,29 @@ impl App {
             app.controls
                 .insert(id, child(settings, w!("BUTTON"), id, WS_TABSTOP.0)?);
         }
-        app.controls.insert(
-            ECHO,
-            child(main, TRACKBAR_CLASSW, ECHO, WS_TABSTOP.0 | TBS_NOTICKS)?,
+        for id in [ECHO, BASS] {
+            app.controls.insert(
+                id,
+                child(main, TRACKBAR_CLASSW, id, WS_TABSTOP.0 | TBS_NOTICKS)?,
+            );
+        }
+        send(
+            app.control(BASS),
+            TBM_SETRANGEMIN,
+            0,
+            (MIN_BASS_DB * BASS_UNITS_PER_DB) as isize,
+        );
+        send(
+            app.control(BASS),
+            TBM_SETRANGEMAX,
+            1,
+            (MAX_BASS_DB * BASS_UNITS_PER_DB) as isize,
+        );
+        send(
+            app.control(BASS),
+            TBM_SETPOS,
+            1,
+            (app.preferences.active.bass_db * BASS_UNITS_PER_DB) as isize,
         );
         set_text(app.control(BUNDLE), &app.preferences.active.bundle);
         for (id, value) in [
@@ -427,7 +461,7 @@ impl App {
         app.order_tab_stops(
             main,
             &[
-                LANGUAGE, SOURCE, REFRESH, SETUP_APO, STRENGTH, ECHO, SETTINGS, START,
+                LANGUAGE, SOURCE, REFRESH, SETUP_APO, STRENGTH, ECHO, BASS, SETTINGS, START,
             ],
         )?;
         app.order_tab_stops(
@@ -626,7 +660,9 @@ impl App {
             let strength_control = strength_top + LINE_HEIGHT + GAP / 2;
             let echo_top = strength_control + CONTROL_HEIGHT + MARGIN;
             let echo_control = echo_top + LINE_HEIGHT + GAP / 2;
-            let signal_top = echo_control + CONTROL_HEIGHT + MARGIN;
+            let bass_top = echo_control + CONTROL_HEIGHT + MARGIN;
+            let bass_control = bass_top + LINE_HEIGHT + GAP / 2;
+            let signal_top = bass_control + CONTROL_HEIGHT + MARGIN;
             let meter_top = signal_top + LINE_HEIGHT + GAP;
             let message_top = meter_top + METER_HEIGHT + GAP;
             let buttons_top = height - MARGIN - CONTROL_HEIGHT;
@@ -689,6 +725,21 @@ impl App {
                 ECHO_PERCENT,
                 width - MARGIN - PERCENT_WIDTH,
                 echo_control,
+                PERCENT_WIDTH,
+                CONTROL_HEIGHT,
+            );
+            place(BASS_LABEL, MARGIN, bass_top, content_width, LINE_HEIGHT);
+            place(
+                BASS,
+                MARGIN,
+                bass_control,
+                content_width - PERCENT_WIDTH - GAP,
+                CONTROL_HEIGHT,
+            );
+            place(
+                BASS_VALUE,
+                width - MARGIN - PERCENT_WIDTH,
+                bass_control,
                 PERCENT_WIDTH,
                 CONTROL_HEIGHT,
             );
@@ -793,6 +844,7 @@ impl App {
             (SAVE, Text::Save),
             (CANCEL_PICKER, Text::Cancel),
             (DELAY, Text::Delay),
+            (BASS_LABEL, Text::Bass),
             (ECHO_LABEL, Text::EchoReduction),
             (ECHO_TIP, Text::EchoTip),
         ] {
@@ -802,6 +854,10 @@ impl App {
         self.update();
     }
     fn update(&self) {
+        set_text(
+            self.control(BASS_VALUE),
+            &format!("{:+.1} dB", self.preferences.active.bass_db),
+        );
         set_text(
             self.control(ECHO_PERCENT),
             &format!(
@@ -838,7 +894,7 @@ impl App {
                 &self.message
             },
         );
-        let idle = self.live.is_none();
+        let idle = self.live.is_none() && self.setup.is_none();
 
         // SAFETY: all control handles belong to this App's live window hierarchy.
         // EnableWindow changes only UI interaction state on the owning thread.
@@ -854,7 +910,8 @@ impl App {
             let _ = EnableWindow(self.control(CANCEL_PICKER), self.picker.is_some());
             let _ = EnableWindow(
                 self.control(START),
-                self.live.is_some() || (!self.discovering() && self.picker.is_none()),
+                self.setup.is_none()
+                    && (self.live.is_some() || (!self.discovering() && self.picker.is_none())),
             );
         }
         if self
@@ -903,7 +960,7 @@ impl App {
         self.devices_task.is_some() || self.adapters_task.is_some()
     }
     fn refresh(&mut self) {
-        if self.discovering() || self.live.is_some() {
+        if self.discovering() || self.live.is_some() || self.setup.is_some() {
             return;
         }
         match super::task::JsonTask::start(&["__windows-devices"], DISCOVERY_TIMEOUT) {
@@ -920,23 +977,107 @@ impl App {
         self.running = false;
         self.levels_at = None;
     }
+    fn setup_prompt(&self) -> Result<bool> {
+        let title = wide(self.text(Text::Title));
+        let prompt = wide(self.text(Text::ApoSetupPrompt));
+        let action = wide(self.text(Text::ApoSetupAction));
+        let buttons = [TASKDIALOG_BUTTON {
+            nButtonID: IDOK.0,
+            pszButtonText: PCWSTR(action.as_ptr()),
+        }];
+        let configuration = TASKDIALOGCONFIG {
+            cbSize: size_of::<TASKDIALOGCONFIG>() as u32,
+            hwndParent: self.windows.main,
+            dwFlags: TDF_ALLOW_DIALOG_CANCELLATION | TDF_POSITION_RELATIVE_TO_WINDOW,
+            dwCommonButtons: TDCBF_CANCEL_BUTTON,
+            pszWindowTitle: PCWSTR(title.as_ptr()),
+            pszMainInstruction: PCWSTR(prompt.as_ptr()),
+            cButtons: buttons.len() as u32,
+            pButtons: buttons.as_ptr(),
+            nDefaultButton: IDOK.0,
+            ..Default::default()
+        };
+        #[cfg(test)]
+        let configuration = TASKDIALOGCONFIG {
+            pfCallback: Some(tests::cancel_setup_dialog),
+            ..configuration
+        };
+        let mut selected = 0;
+        // SAFETY: the parent and all task-dialog text/button buffers live until it closes.
+        // Only this UI thread displays the native modal; no process or GPU wait occurs here.
+        // Nested messages use the existing reentrancy guard around App ownership.
+        unsafe { TaskDialogIndirect(&configuration, Some(&mut selected), None, None) }
+            .map_err(os_error)?;
+        Ok(selected == IDOK.0)
+    }
+    fn setup_notice(&self, text: &str, flags: MESSAGEBOX_STYLE) {
+        let title = wide(self.text(Text::Title));
+        let text = wide(text);
+        // SAFETY: Windows borrows the UI-owned HWND and text for this modal call only.
+        // Setup results arrive through the worker channel before displaying the notice.
+        // The existing message-pump guard handles synchronous dialog reentrancy.
+        unsafe {
+            MessageBoxW(
+                Some(self.windows.main),
+                PCWSTR(text.as_ptr()),
+                PCWSTR(title.as_ptr()),
+                MB_OK | flags,
+            );
+        }
+    }
+    fn setup_error(&mut self, error: Error) {
+        self.message = format!("{}\n{}", self.text(Text::ApoSetupFailed), error);
+        self.setup_notice(&self.message, MB_ICONERROR);
+    }
+    fn request_setup(&mut self, start_after: bool) -> Result<()> {
+        if self.setup.is_some() || self.live.is_some() || self.picker.is_some() {
+            return Ok(());
+        }
+        let source = self.preferences.active.source.clone();
+        if source.is_empty() {
+            return Err(Error::new(self.text(Text::ChooseSource)));
+        }
+        if super::audio::installed(&source) {
+            self.setup_notice(self.text(Text::ApoSetupComplete), MB_ICONINFORMATION);
+            return Ok(());
+        }
+        if !self.setup_prompt()? {
+            self.message = self.text(Text::ApoSetupCancelled).into();
+            return Ok(());
+        }
+        match super::setup::SetupTask::start(&source, self.windows.main) {
+            Ok(task) => {
+                self.setup = Some(SetupRun {
+                    task,
+                    source,
+                    start_after,
+                });
+                self.message = self.text(Text::ApoSetupRunning).into();
+            }
+            Err(error) => self.setup_error(error),
+        }
+        Ok(())
+    }
     fn start(&mut self) -> Result<()> {
+        if self.setup.is_some() {
+            return Ok(());
+        }
         self.preferences.active.bundle = get_text(self.control(BUNDLE));
         self.preferences.validate()?;
-        if self.adapters.is_empty() {
-            return Err(Error::new(
-                "No supported AMD Vulkan adapter was found. Check the AMD driver and refresh before starting.",
-            ));
-        }
         let active = &self.preferences.active;
-        if active.bundle.is_empty() {
-            return Err(Error::new(self.text(Text::ChooseBundle)));
-        }
         if active.source.is_empty() {
             return Err(Error::new(self.text(Text::ChooseSource)));
         }
         if !super::audio::installed(&active.source) {
-            return Err(Error::new(self.text(Text::ApoSetupRequired)));
+            return self.request_setup(true);
+        }
+        if active.bundle.is_empty() {
+            return Err(Error::new(self.text(Text::ChooseBundle)));
+        }
+        if self.adapters.is_empty() {
+            return Err(Error::new(
+                "No supported AMD Vulkan adapter was found. Check the AMD driver and refresh before starting.",
+            ));
         }
         let control = self
             .path
@@ -990,7 +1131,7 @@ impl App {
         Ok(())
     }
     fn browse(&mut self, installer: bool) -> Result<()> {
-        if self.picker.is_some() || self.live.is_some() {
+        if self.picker.is_some() || self.live.is_some() || self.setup.is_some() {
             return Ok(());
         }
         let mut command = Command::new(std::env::current_exe()?);
@@ -1015,6 +1156,30 @@ impl App {
         Ok(())
     }
     fn tick(&mut self) -> Result<()> {
+        if let Some(result) = self.setup.as_ref().and_then(|setup| setup.task.poll()) {
+            let setup = self
+                .setup
+                .take()
+                .ok_or_else(|| Error::new("Missing microphone setup state"))?;
+            match result {
+                Ok(super::setup::Outcome::Installed) => {
+                    for input in &mut self.inputs {
+                        if input.id == setup.source {
+                            input.apo_installed = true;
+                        }
+                    }
+                    self.message = self.text(Text::ApoSetupComplete).into();
+                    self.setup_notice(&self.message, MB_ICONINFORMATION);
+                    if setup.start_after && self.preferences.active.source == setup.source {
+                        self.start()?;
+                    }
+                }
+                Ok(super::setup::Outcome::Cancelled) => {
+                    self.message = self.text(Text::ApoSetupCancelled).into()
+                }
+                Err(error) => self.setup_error(error),
+            }
+        }
         if let Some(result) = self
             .devices_task
             .as_ref()
@@ -1181,11 +1346,7 @@ impl App {
                     self.start()?;
                 }
             }
-            SETUP_APO => {
-                if self.live.is_none() {
-                    super::audio::setup(&self.preferences.active.source)?;
-                }
-            }
+            SETUP_APO => self.request_setup(false)?,
             REFRESH => self.refresh(),
             SETTINGS => {
                 // SAFETY: the settings HWND is owned and created on this UI thread.
@@ -1242,6 +1403,7 @@ impl Drop for App {
         self.adapters_task.take();
         self.live.take();
         self.picker.take();
+        self.setup.take();
         // SAFETY: controls and fonts belong to this thread's window hierarchy.
         // Detach application fonts before controls release their cached DCs.
         // The borrowed system font stays owned by Windows and is never deleted.
@@ -1297,23 +1459,21 @@ unsafe extern "system" fn window_proc(
                     Ok(())
                 }
                 WM_HSCROLL
-                    if [STRENGTH, ECHO]
+                    if [STRENGTH, ECHO, BASS]
                         .iter()
                         .any(|id| lparam.0 == app.control(*id).0 as isize) =>
                 {
                     // The trackbar get-position message aliases WM_USER in commctrl.h.
-                    // windows-rs omits that alias, so use its documented numeric identity.
-                    // The returned position is limited by the configured percentage range.
-                    let id = if lparam.0 == app.control(ECHO).0 as isize {
-                        ECHO
-                    } else {
-                        STRENGTH
-                    };
-                    let value = send(app.control(id), WM_USER, 0, 0) as f32 / PERCENT_MAX as f32;
-                    if id == ECHO {
-                        app.preferences.active.echo_reduction = value;
-                    } else {
-                        app.preferences.active.strength = value;
+                    // windows-rs omits that alias, so use its documented identity.
+                    // Bass uses signed half-decibel steps; other sliders use percent.
+                    let id = [STRENGTH, ECHO, BASS]
+                        .into_iter()
+                        .find(|id| lparam.0 == app.control(*id).0 as isize)?;
+                    let value = send(app.control(id), WM_USER, 0, 0) as f32;
+                    match id {
+                        BASS => app.preferences.active.bass_db = value / BASS_UNITS_PER_DB,
+                        ECHO => app.preferences.active.echo_reduction = value / PERCENT_MAX as f32,
+                        _ => app.preferences.active.strength = value / PERCENT_MAX as f32,
                     }
                     let result = if let Some(live) = &app.live {
                         ProcessingControl::write(&live.control, &app.preferences.active)
@@ -1581,7 +1741,7 @@ mod tests {
             assert!(IsWindow(Some(settings)).as_bool());
             assert!(take_quit_message());
             let expected = [
-                LANGUAGE, SOURCE, REFRESH, SETUP_APO, STRENGTH, ECHO, SETTINGS, START,
+                LANGUAGE, SOURCE, REFRESH, SETUP_APO, STRENGTH, ECHO, BASS, SETTINGS, START,
             ];
             let mut previous = None;
             for id in expected {
@@ -1632,6 +1792,82 @@ mod tests {
                 );
                 assert_eq!(preferences.active.strength, 1.0);
                 assert_eq!(get_text(app.control(ECHO_PERCENT)), format!("{position}%"));
+            });
+        }
+        drop(APP.with(|slot| slot.borrow_mut().take()));
+    }
+
+    thread_local! { static SETUP_BUTTON_TEXT: RefCell<Option<String>> = const { RefCell::new(None) }; }
+    pub(super) unsafe extern "system" fn cancel_setup_dialog(
+        window: HWND,
+        message: TASKDIALOG_NOTIFICATIONS,
+        _: WPARAM,
+        _: LPARAM,
+        _: isize,
+    ) -> ::windows::core::HRESULT {
+        if message == TDN_CREATED {
+            // SAFETY: the task dialog and its buttons are live on this test thread.
+            // Record the native action label, then post its normal Cancel action.
+            // The test never accepts setup or launches an elevated process.
+            unsafe {
+                if let Ok(button) = GetDlgItem(Some(window), IDOK.0) {
+                    SETUP_BUTTON_TEXT.with(|text| *text.borrow_mut() = Some(get_text(button)));
+                }
+                let _ = PostMessageW(
+                    Some(window),
+                    TDM_CLICK_BUTTON.0 as u32,
+                    WPARAM(IDCANCEL.0 as usize),
+                    LPARAM(0),
+                );
+            }
+        }
+        ::windows::Win32::Foundation::S_OK
+    }
+    #[test]
+    fn start_automatically_offers_localized_setup_and_cancel_never_starts_audio() {
+        let _apartment = Apartment::new().unwrap();
+        register_window_class().unwrap();
+        let directory = SettingsDirectory::new();
+        let windows = OwnedWindows::create().unwrap();
+        let mut app = App::create(windows, directory.0.join("setup-dialog.json"), None).unwrap();
+        app.preferences.active.source = "{a183f262-9999-4333-9222-f85e794501cc}".into();
+        for language in Language::ALL {
+            app.preferences.language = language;
+            app.start().unwrap();
+            assert_eq!(app.message, language.text(Text::ApoSetupCancelled));
+            assert!(app.live.is_none());
+            assert!(app.setup.is_none());
+            SETUP_BUTTON_TEXT.with(|text| {
+                assert_eq!(
+                    text.borrow().as_deref(),
+                    Some(language.text(Text::ApoSetupAction))
+                )
+            });
+        }
+    }
+
+    #[test]
+    fn native_bass_slider_saves_signed_gain_and_preserves_other_controls() {
+        let _apartment = Apartment::new().unwrap();
+        register_window_class().unwrap();
+        let directory = SettingsDirectory::new();
+        let windows = OwnedWindows::create().unwrap();
+        let main = windows.main;
+        let app = App::create(windows, directory.0.join("bass-slider.json"), None).unwrap();
+        let slider = app.control(BASS);
+        APP.with(|slot| *slot.borrow_mut() = Some(app));
+        for position in [-12, 0, 12, 5] {
+            send(slider, TBM_SETPOS, 1, position);
+            send(main, WM_HSCROLL, 0, slider.0 as isize);
+            APP.with(|slot| {
+                let slot = slot.borrow();
+                let app = slot.as_ref().unwrap();
+                let preferences = Preferences::load(&app.path).unwrap();
+                let db = position as f32 / BASS_UNITS_PER_DB;
+                assert_eq!(preferences.active.bass_db, db);
+                assert_eq!(preferences.active.strength, 1.0);
+                assert_eq!(preferences.active.echo_reduction, 0.0);
+                assert_eq!(get_text(app.control(BASS_VALUE)), format!("{db:+.1} dB"));
             });
         }
         drop(APP.with(|slot| slot.borrow_mut().take()));

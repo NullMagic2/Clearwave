@@ -26,7 +26,9 @@ GNU cross-compilation is also supported with MinGW-w64 and windres.
 This is an unsigned **APO development preview**. Read `WINDOWS-APO.md` in the
 archive (or `docs/WINDOWS_APO.md` in source) before setup. It describes installation,
 removal, 48 kHz format requirements, 120 ms latency, fallback and deployment limits.
-The setup button requests elevation to attach to the selected existing microphone.
+Start offers a short Yes/Cancel setup dialog when the selected microphone is not
+registered. Setup runs asynchronously and requests elevation; the manual setup
+button uses the same flow.
 Applications continue selecting that original microphone. No kernel driver or
 virtual microphone is created, and microphone audio is never sent to speakers.
 

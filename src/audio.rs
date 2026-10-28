@@ -386,6 +386,12 @@ impl StreamProcessor {
         processor.voice_balance = Some(crate::voice_balance::VoiceBalance::default());
         Ok(processor)
     }
+    pub fn set_bass(&mut self, db: f32) -> Result<()> {
+        self.voice_balance
+            .as_mut()
+            .ok_or_else(|| Error::new("Bass control requires the microphone processor"))?
+            .set_bass(db)
+    }
     pub fn set_echo_reduction(&mut self, amount: f32) -> Result<()> {
         self.echo.set_amount(amount)
     }
@@ -602,29 +608,36 @@ mod tests {
             })
             .collect();
         for profile in [ModelProfile::RtxVoice, ModelProfile::Broadcast23] {
-            let mut predict = |_: &[f32]| Ok(vec![0.1; GAINS]);
-            let mut expected = Processor::for_profile(profile)
-                .unwrap()
-                .process_with_echo(&samples, 1.0, 0.6, &mut predict)
-                .unwrap();
-            crate::voice_balance::VoiceBalance::default()
-                .process(&mut expected)
-                .unwrap();
-            let mut stream = StreamProcessor::microphone(profile).unwrap();
-            stream.set_echo_reduction(0.6).unwrap();
-            let mut actual = Vec::new();
-            for chunk in samples.chunks(173) {
-                actual.extend(stream.push(chunk, 1.0, &mut predict).unwrap());
+            for bass_db in [
+                crate::voice_balance::MIN_BASS_DB,
+                crate::voice_balance::DEFAULT_BASS_DB,
+                crate::voice_balance::MAX_BASS_DB,
+            ] {
+                let mut predict = |_: &[f32]| Ok(vec![0.1; GAINS]);
+                let mut expected = Processor::for_profile(profile)
+                    .unwrap()
+                    .process_with_echo(&samples, 1.0, 0.6, &mut predict)
+                    .unwrap();
+                let mut balance = crate::voice_balance::VoiceBalance::default();
+                balance.set_bass(bass_db).unwrap();
+                balance.process(&mut expected).unwrap();
+                let mut stream = StreamProcessor::microphone(profile).unwrap();
+                stream.set_echo_reduction(0.6).unwrap();
+                stream.set_bass(bass_db).unwrap();
+                let mut actual = Vec::new();
+                for chunk in samples.chunks(173) {
+                    actual.extend(stream.push(chunk, 1.0, &mut predict).unwrap());
+                }
+                actual.extend(stream.finish(1.0, &mut predict).unwrap());
+                assert_eq!(actual.len(), samples.len());
+                assert!(actual.iter().all(|v| v.is_finite() && v.abs() <= 1.0));
+                assert!(
+                    actual
+                        .iter()
+                        .zip(expected)
+                        .all(|(a, b)| (a - b).abs() < 1e-5)
+                );
             }
-            actual.extend(stream.finish(1.0, &mut predict).unwrap());
-            assert_eq!(actual.len(), samples.len());
-            assert!(actual.iter().all(|v| v.is_finite() && v.abs() <= 1.0));
-            assert!(
-                actual
-                    .iter()
-                    .zip(expected)
-                    .all(|(a, b)| (a - b).abs() < 1e-5)
-            );
         }
     }
 

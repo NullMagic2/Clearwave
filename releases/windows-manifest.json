@@ -1,13 +1,13 @@
 {
-  "version": "0.7.1-dev.6",
+  "version": "0.7.1-dev.7",
   "architecture": "x86_64",
   "target": "x86_64-pc-windows-gnu",
-  "filename": "clearwave-0.7.1-dev.6-windows-x86_64.zip",
-  "sha256": "11f43bc4c3a78f2f939a02b1c7b52af8adeb67f873f0690968958c66fceebf79",
+  "filename": "clearwave-0.7.1-dev.7-windows-x86_64.zip",
+  "sha256": "7445678e5c9477b0c6998b0471e6337a7013209d6edd3a50e56a9cc86c53619a",
   "windows_audio": "capture-apo-preview",
   "native_audio_host_verified": false,
-  "apo_sha256": "f323fe025e097a11ab85a9d7a0224617dfb174ec39f0275e5550fbaca3242c20",
-  "binary_sha256": "6ae0cdefc93b28b920dc7622fa63e4b7ec89408169a40c49842c9cda82245be6",
+  "apo_sha256": "ee531d3e246e58528612f80bad1de97011b389497d38fed70dc8413ff1e35efb",
+  "binary_sha256": "406451e665b0e09b8969031867b5b4e555da47412447c041d6455d4eda5b29c5",
   "rust_dependency_notices": 114,
   "nvidia_assets_included": false,
   "style_guide_included": false

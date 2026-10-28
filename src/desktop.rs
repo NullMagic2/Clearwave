@@ -8,6 +8,7 @@ use crate::{
     gpu::AdapterInfo,
     i18n::{Language, Text},
     pipewire::Node,
+    voice_balance::{BASS_STEP_DB, MAX_BASS_DB, MIN_BASS_DB},
 };
 use gtk::{glib, prelude::*};
 use std::{
@@ -488,6 +489,8 @@ struct Interface {
     latency: gtk::SpinButton,
     echo: gtk::Scale,
     echo_percent: gtk::Label,
+    bass: gtk::Scale,
+    bass_value: gtk::Label,
     save: gtk::Button,
     updating: Rc<Cell<bool>>,
     revision: Rc<Cell<u64>>,
@@ -508,6 +511,45 @@ fn margins(widget: &impl IsA<gtk::Widget>, value: i32) {
     widget.set_margin_end(value);
     widget.set_margin_top(value);
     widget.set_margin_bottom(value);
+}
+
+fn slider_row(
+    title: &gtk::Label,
+    minimum: f64,
+    maximum: f64,
+    step: f64,
+    tip: Text,
+) -> (gtk::Box, gtk::Scale, gtk::Label) {
+    let panel = vertical(6);
+    let heading = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    heading.pack_start(title, true, true, 0);
+    let value = label("");
+    heading.pack_end(&value, false, false, 0);
+    panel.add(&heading);
+
+    let scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, minimum, maximum, step);
+    scale.set_draw_value(false);
+    scale.set_tooltip_text(Some(Language::default().text(tip)));
+    panel.add(&scale);
+    let weak = heading.downgrade();
+    scale.connect_size_allocate(move |scale, _| {
+        let scale = scale.downgrade();
+        let heading = weak.clone();
+        glib::idle_add_local_once(move || {
+            if let (Some(scale), Some(heading)) = (scale.upgrade(), heading.upgrade()) {
+                // Read track geometry after GTK finishes allocating its themed gadgets.
+                // Match headings to the trough instead of hard-coding theme padding.
+                // Weak references keep pending layout work from retaining closed windows.
+                let range = scale.range_rect();
+                let left = range.x().max(0);
+                let right = (scale.allocated_width() - range.x() - range.width()).max(0);
+                let rtl = scale.direction() == gtk::TextDirection::Rtl;
+                heading.set_margin_start(if rtl { right } else { left });
+                heading.set_margin_end(if rtl { left } else { right });
+            }
+        });
+    });
+    (panel, scale, value)
 }
 
 impl Interface {
@@ -587,40 +629,38 @@ impl Interface {
         input.add(&row);
         content.add(&input);
 
-        let removal = vertical(6);
-        let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        row.pack_start(&translated(Text::Removal), true, true, 0);
-        let percent = label("100%");
-        row.pack_end(&percent, false, false, 0);
-        removal.add(&row);
-        let strength = gtk::Scale::with_range(
-            gtk::Orientation::Horizontal,
+        let (removal, strength, percent) = slider_row(
+            &translated(Text::Removal),
             0.0,
             f64::from(PERCENT_SCALE),
             1.0,
+            Text::StrengthTip,
         );
-        strength.set_draw_value(false);
         strength.set_value(f64::from(PERCENT_SCALE));
-        strength.set_tooltip_text(Some(Language::default().text(Text::StrengthTip)));
-        removal.add(&strength);
         content.add(&removal);
 
-        let echo_panel = vertical(6);
-        let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        row.pack_start(&translated(Text::EchoReduction), true, true, 0);
-        let echo_percent = label("0%");
-        row.pack_end(&echo_percent, false, false, 0);
-        echo_panel.add(&row);
-        let echo = gtk::Scale::with_range(
-            gtk::Orientation::Horizontal,
+        let (echo_panel, echo, echo_percent) = slider_row(
+            &translated(Text::EchoReduction),
             0.0,
             f64::from(PERCENT_SCALE),
             1.0,
+            Text::EchoTip,
         );
-        echo.set_draw_value(false);
-        echo.set_tooltip_text(Some(Language::default().text(Text::EchoTip)));
-        echo_panel.add(&echo);
         content.add(&echo_panel);
+
+        let (bass_panel, bass, bass_value) = slider_row(
+            &translated(Text::Bass),
+            f64::from(MIN_BASS_DB),
+            f64::from(MAX_BASS_DB),
+            f64::from(BASS_STEP_DB),
+            Text::BassTip,
+        );
+        bass.connect_change_value(|scale, _, value| {
+            let step = f64::from(BASS_STEP_DB);
+            scale.set_value((value / step).round() * step);
+            glib::Propagation::Stop
+        });
+        content.add(&bass_panel);
 
         let signal = vertical(8);
         signal.add(&translated(Text::Signal));
@@ -757,6 +797,8 @@ impl Interface {
             latency,
             echo,
             echo_percent,
+            bass,
+            bass_value,
             save,
             updating: Rc::new(Cell::new(false)),
             revision: Rc::new(Cell::new(u64::MAX)),
@@ -791,6 +833,8 @@ impl Interface {
             .set_tooltip_text(Some(language.text(Text::StrengthTip)));
         self.echo
             .set_tooltip_text(Some(language.text(Text::EchoTip)));
+        self.bass
+            .set_tooltip_text(Some(language.text(Text::BassTip)));
         self.use_default
             .set_tooltip_text(Some(language.text(Text::DefaultTip)));
     }
@@ -824,6 +868,8 @@ impl Interface {
         self.echo.set_value(
             f64::from(state.preferences.active.echo_reduction) * f64::from(PERCENT_SCALE),
         );
+        self.bass
+            .set_value(f64::from(state.preferences.active.bass_db));
         self.latency
             .set_value(state.preferences.active.latency_ms.into());
         self.strength
@@ -872,6 +918,8 @@ impl Interface {
         self.adapter.set_sensitive(live.is_none());
         self.latency.set_sensitive(live.is_none());
         self.use_default.set_sensitive(ready);
+        self.bass_value
+            .set_text(&format!("{:+.1} dB", state.preferences.active.bass_db));
         self.echo_percent.set_text(&format!(
             "{:.0}%",
             state.preferences.active.echo_reduction * PERCENT_SCALE
@@ -1002,7 +1050,11 @@ impl Interface {
                 state.changed();
             }
         });
-        for (scale, is_echo) in [(&self.strength, false), (&self.echo, true)] {
+        for (scale, key) in [
+            (&self.strength, Text::Removal),
+            (&self.echo, Text::EchoReduction),
+            (&self.bass, Text::Bass),
+        ] {
             let weak = Rc::downgrade(state);
             let updating = self.updating.clone();
             scale.connect_value_changed(move |scale| {
@@ -1011,11 +1063,13 @@ impl Interface {
                 }
                 if let Some(state) = weak.upgrade() {
                     let mut state = state.borrow_mut();
-                    let value = (scale.value() / f64::from(PERCENT_SCALE)) as f32;
-                    if is_echo {
-                        state.preferences.active.echo_reduction = value;
-                    } else {
-                        state.preferences.active.strength = value;
+                    let value = scale.value() as f32;
+                    match key {
+                        Text::Bass => state.preferences.active.bass_db = value,
+                        Text::EchoReduction => {
+                            state.preferences.active.echo_reduction = value / PERCENT_SCALE
+                        }
+                        _ => state.preferences.active.strength = value / PERCENT_SCALE,
                     }
                     if let Some(live) = &state.live
                         && let Err(error) =
@@ -1122,6 +1176,56 @@ impl Interface {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[ignore = "requires an explicit preview output directory and a GTK display"]
+    fn preview_slider_alignment_and_bass() {
+        use gtk::gdk::prelude::*;
+        gtk::init().unwrap();
+        let ui = Interface::new().unwrap();
+        ui.localize(Language::EnglishBritish);
+        ui.source.append(Some("dummy"), "USB Microphone");
+        ui.source.set_active(Some(0));
+        ui.output.set_text("USB Microphone – Clearwave");
+        ui.strength.set_value(75.0);
+        ui.percent.set_text("75%");
+        ui.echo.set_value(20.0);
+        ui.echo_percent.set_text("20%");
+        ui.bass
+            .set_value(f64::from(crate::voice_balance::DEFAULT_BASS_DB));
+        ui.bass_value.set_text("+2.5 dB");
+        ui.window.show_all();
+        ui.message.hide();
+        for _ in 0..30 {
+            while gtk::events_pending() {
+                gtk::main_iteration_do(false);
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        for scale in [&ui.strength, &ui.echo, &ui.bass] {
+            let range = scale.range_rect();
+            let (start, end) = scale.slider_range();
+            let panel = scale.parent().unwrap().downcast::<gtk::Box>().unwrap();
+            let heading = panel.children()[0].clone();
+            let expected = scale.allocation().x() + range.x();
+            assert_eq!(heading.allocation().x(), expected);
+            println!(
+                "heading={}, track={expected}, slider={start}..{end}",
+                heading.allocation().x()
+            );
+        }
+        let directory = PathBuf::from(std::env::var_os("CLEARWAVE_PREVIEW_DIRECTORY").unwrap());
+        std::fs::create_dir_all(&directory).unwrap();
+        let size = ui.window.allocation();
+        ui.window
+            .window()
+            .unwrap()
+            .pixbuf(0, 0, size.width(), size.height())
+            .unwrap()
+            .savev(directory.join("linux-bass.png"), "png", &[])
+            .unwrap();
+        ui.window.close();
+    }
+
     #[test]
     fn closing_live_processing_never_waits_for_a_stuck_child_on_the_ui_thread() {
         let mut child = Command::new("sh")

@@ -66,7 +66,12 @@ pub struct AudioSettings {
     pub strength: f32,
     #[serde(default)]
     pub echo_reduction: f32,
+    #[serde(default = "default_bass")]
+    pub bass_db: f32,
     pub latency_ms: u16,
+}
+fn default_bass() -> f32 {
+    crate::voice_balance::DEFAULT_BASS_DB
 }
 impl Default for AudioSettings {
     fn default() -> Self {
@@ -77,6 +82,7 @@ impl Default for AudioSettings {
             render: String::new(),
             strength: 1.0,
             echo_reduction: 0.0,
+            bass_db: default_bass(),
             latency_ms: DEFAULT_LATENCY_MS,
         }
     }
@@ -85,6 +91,7 @@ impl AudioSettings {
     pub fn validate(&self) -> Result<()> {
         crate::audio::validate_strength(self.strength)?;
         crate::audio::validate_strength(self.echo_reduction)?;
+        crate::voice_balance::validate_bass(self.bass_db)?;
         if !(MIN_LATENCY_MS..=MAX_LATENCY_MS).contains(&self.latency_ms)
             || [&self.bundle, &self.source, &self.adapter, &self.render]
                 .iter()
@@ -236,6 +243,8 @@ pub struct ProcessingControl {
     pub strength: f32,
     #[serde(default)]
     pub echo_reduction: f32,
+    #[serde(default = "default_bass")]
+    pub bass_db: f32,
 }
 impl ProcessingControl {
     pub fn read(path: &Path) -> Result<Self> {
@@ -245,12 +254,14 @@ impl ProcessingControl {
     }
     fn validate(&self) -> Result<()> {
         crate::audio::validate_strength(self.strength)?;
-        crate::audio::validate_strength(self.echo_reduction)
+        crate::audio::validate_strength(self.echo_reduction)?;
+        crate::voice_balance::validate_bass(self.bass_db)
     }
     pub fn write(path: &Path, settings: &AudioSettings) -> Result<()> {
         let control = Self {
             strength: settings.strength,
             echo_reduction: settings.echo_reduction,
+            bass_db: settings.bass_db,
         };
         control.validate()?;
         atomic_write(path, &serde_json::to_vec(&control)?)
@@ -367,17 +378,31 @@ mod tests {
         let settings = AudioSettings {
             strength: 0.45,
             echo_reduction: 0.63,
+            bass_db: -3.5,
             ..AudioSettings::default()
         };
         ProcessingControl::write(&path, &settings).unwrap();
         let decoded = ProcessingControl::read(&path).unwrap();
         assert_eq!(decoded.strength, settings.strength);
         assert_eq!(decoded.echo_reduction, settings.echo_reduction);
+        assert_eq!(decoded.bass_db, settings.bass_db);
+        let saved = Preferences {
+            active: settings,
+            ..Preferences::default()
+        };
+        let restored = Preferences::decode(&serde_json::to_vec(&saved).unwrap()).unwrap();
+        assert_eq!(restored.active.bass_db, -3.5);
+        let legacy = Preferences::decode(br#"{"version":2,"active":{"strength":0.5}}"#).unwrap();
+        assert_eq!(legacy.active.bass_db, default_bass());
         std::fs::write(&path, br#"{"strength":0.5}"#).unwrap();
-        assert_eq!(ProcessingControl::read(&path).unwrap().echo_reduction, 0.0);
+        let legacy_control = ProcessingControl::read(&path).unwrap();
+        assert_eq!(legacy_control.echo_reduction, 0.0);
+        assert_eq!(legacy_control.bass_db, default_bass());
         for payload in [
             br#"{"strength":0.5,"echo_reduction":-0.1}"#.as_slice(),
             br#"{"strength":0.5,"echo_reduction":1.1}"#,
+            br#"{"strength":0.5,"bass_db":-6.1}"#,
+            br#"{"strength":0.5,"bass_db":6.1}"#,
         ] {
             std::fs::write(&path, payload).unwrap();
             assert!(ProcessingControl::read(&path).is_err());
