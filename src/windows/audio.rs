@@ -5,7 +5,7 @@
 use crate::{
     Error, Result,
     audio::{HOP, RATE, StreamProcessor},
-    controls::{Levels, StrengthControl},
+    controls::{Levels, ProcessingControl},
     network::{Backend, CONTEXT, Network},
 };
 use cpal::{
@@ -13,7 +13,7 @@ use cpal::{
     SupportedStreamConfig,
     traits::{DeviceTrait, HostTrait, StreamTrait},
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
     collections::VecDeque,
@@ -34,15 +34,17 @@ const CONTROL_INTERVAL_HOPS: u64 = 10;
 const DEVICE_TIMEOUT: Duration = Duration::from_secs(3);
 const CAPTURE_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct Endpoint {
     pub id: String,
     pub name: String,
 }
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 pub struct Endpoints {
     pub inputs: Vec<Endpoint>,
     pub outputs: Vec<Endpoint>,
+    #[serde(default)]
+    pub warnings: Vec<String>,
 }
 fn describe(device: Device) -> Result<Endpoint> {
     Ok(Endpoint {
@@ -53,19 +55,41 @@ fn describe(device: Device) -> Result<Endpoint> {
 fn audio_error(error: cpal::Error) -> Error {
     Error::new(format!("Windows audio: {error}"))
 }
+fn collect_endpoints(
+    devices: impl Iterator<Item = Result<Endpoint>>,
+    warnings: &mut Vec<String>,
+) -> Vec<Endpoint> {
+    devices
+        .filter_map(|device| match device {
+            Ok(endpoint) => Some(endpoint),
+            Err(error) => {
+                warnings.push(error.to_string());
+                None
+            }
+        })
+        .collect()
+}
 pub fn endpoints() -> Result<Endpoints> {
     let host = cpal::default_host();
+    let mut warnings = Vec::new();
+    let inputs = collect_endpoints(
+        host.input_devices()
+            .map(|devices| devices.map(describe).collect::<Vec<_>>())
+            .unwrap_or_else(|error| vec![Err(audio_error(error))])
+            .into_iter(),
+        &mut warnings,
+    );
+    let outputs = collect_endpoints(
+        host.output_devices()
+            .map(|devices| devices.map(describe).collect::<Vec<_>>())
+            .unwrap_or_else(|error| vec![Err(audio_error(error))])
+            .into_iter(),
+        &mut warnings,
+    );
     Ok(Endpoints {
-        inputs: host
-            .input_devices()
-            .map_err(audio_error)?
-            .map(describe)
-            .collect::<Result<_>>()?,
-        outputs: host
-            .output_devices()
-            .map_err(audio_error)?
-            .map(describe)
-            .collect::<Result<_>>()?,
+        inputs,
+        outputs,
+        warnings,
     })
 }
 
@@ -178,7 +202,7 @@ where
 }
 
 /// Process one explicit microphone and one explicit render endpoint.
-/// The desktop owns this internal command's job and atomic strength file.
+/// The desktop owns this internal command's job and atomic processing-control file.
 /// Failure ends this stream without selecting another device or changing defaults.
 pub fn run(args: &[PathBuf]) -> Result<()> {
     if args.len() != 5 {
@@ -209,8 +233,9 @@ pub fn run(args: &[PathBuf]) -> Result<()> {
         &model,
         Backend::amd((!selector.is_empty()).then_some(selector))?,
     )?;
-    let mut processor = StreamProcessor::new()?;
-    let mut strength = StrengthControl::read(&args[3])?;
+    let mut processor = StreamProcessor::new(model.profile)?;
+    let mut control = ProcessingControl::read(&args[3])?;
+    processor.set_echo_reduction(control.echo_reduction)?;
     let (capture_send, capture_recv) = mpsc::sync_channel(AUDIO_QUEUE_BLOCKS);
     let (render_send, render_recv) = mpsc::sync_channel(AUDIO_QUEUE_BLOCKS);
     let failed = Arc::new(AtomicBool::new(false));
@@ -278,10 +303,11 @@ pub fn run(args: &[PathBuf]) -> Result<()> {
         pending.extend(block);
         while pending.len() >= HOP {
             if hops.is_multiple_of(CONTROL_INTERVAL_HOPS) {
-                strength = StrengthControl::read(&args[3])?;
+                control = ProcessingControl::read(&args[3])?;
+                processor.set_echo_reduction(control.echo_reduction)?;
             }
             let hop: Vec<_> = pending.drain(..HOP).collect();
-            let processed = processor.push(&hop, strength, &mut |c| network.step(c))?;
+            let processed = processor.push(&hop, control.strength, &mut |c| network.step(c))?;
             levels.add(&processed);
             if !processed.is_empty() {
                 render_send
@@ -298,5 +324,34 @@ pub fn run(args: &[PathBuf]) -> Result<()> {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn unavailable_endpoint_does_not_hide_healthy_microphones() {
+        let devices = [
+            Ok(Endpoint {
+                id: "first".into(),
+                name: "First".into(),
+            }),
+            Err(Error::new("Unavailable audio endpoint")),
+            Ok(Endpoint {
+                id: "second".into(),
+                name: "Second".into(),
+            }),
+        ];
+        let mut warnings = Vec::new();
+        let result = collect_endpoints(devices.into_iter(), &mut warnings);
+        assert_eq!(
+            result
+                .iter()
+                .map(|endpoint| endpoint.id.as_str())
+                .collect::<Vec<_>>(),
+            ["first", "second"]
+        );
+        assert_eq!(warnings, ["Unavailable audio endpoint"]);
     }
 }

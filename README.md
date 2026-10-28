@@ -29,6 +29,10 @@ binary packages also include Rust dependency notices.
 
 ## Linux desktop interface
 
+![Clearwave Linux frontend with a generic USB microphone](docs/linux-frontend.png)
+
+*The GTK3 interface with a dummy microphone selection; no personal devices are shown.*
+
 ```sh
 ./bin/clearwave
 # Or select another bundle/settings file:

@@ -16,6 +16,27 @@ impl Complex {
             im: self.re * other.im + self.im * other.re,
         }
     }
+    pub fn conjugate(self) -> Self {
+        Self {
+            re: self.re,
+            im: -self.im,
+        }
+    }
+    pub fn scale(self, factor: f32) -> Self {
+        Self {
+            re: self.re * factor,
+            im: self.im * factor,
+        }
+    }
+    pub fn add(self, other: Self) -> Self {
+        Self {
+            re: self.re + other.re,
+            im: self.im + other.im,
+        }
+    }
+    pub fn subtract(self, other: Self) -> Self {
+        self.add(other.scale(-1.0))
+    }
     pub fn power(self) -> f32 {
         self.re * self.re + self.im * self.im
     }

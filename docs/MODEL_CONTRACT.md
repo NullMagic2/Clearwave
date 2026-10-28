@@ -1,5 +1,9 @@
 # Feature-level model contract
 
+This document describes the legacy RTX Voice graph and waveform conventions.
+Broadcast-specific frame selection, windowing, conditioning, strength behavior,
+and measured comparisons are documented in [BROADCAST_MODEL.md](BROADCAST_MODEL.md).
+
 The application implements this graph over the original named weights and
 provides an offline waveform adapter. Equivalence to the vendor's audio output
 remains pending. CPU/AMD numerical agreement validates numerical consistency;

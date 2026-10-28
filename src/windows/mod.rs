@@ -3,11 +3,12 @@
 //! Model loading, DSP and WASAPI stream callbacks remain safe Rust.
 pub mod audio;
 pub mod desktop;
+pub mod task;
 
 use crate::{Error, Result};
 use ::windows::{
     Win32::{
-        Foundation::{CloseHandle, ERROR_CANCELLED, HANDLE},
+        Foundation::{ERROR_CANCELLED, HANDLE},
         Storage::FileSystem::{MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW},
         System::{
             Com::{
@@ -19,7 +20,7 @@ use ::windows::{
                 JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
                 SetInformationJobObject,
             },
-            Threading::CREATE_NO_WINDOW,
+            Threading::{BELOW_NORMAL_PRIORITY_CLASS, CREATE_NO_WINDOW},
         },
         UI::{
             Shell::{
@@ -34,7 +35,10 @@ use ::windows::{
 };
 use std::{
     marker::PhantomData,
-    os::windows::{ffi::OsStrExt, io::AsRawHandle},
+    os::windows::{
+        ffi::OsStrExt,
+        io::{AsRawHandle, FromRawHandle, OwnedHandle},
+    },
     path::{Path, PathBuf},
     process::{Child, Command},
     rc::Rc,
@@ -170,7 +174,7 @@ pub fn pick_folder(initial: &Path, title: &Path, installer: bool) -> Result<()> 
 /// Reaping runs separately so driver shutdown cannot block the native UI thread.
 pub struct OwnedChild {
     pub child: Option<Child>,
-    job: HANDLE,
+    job: Option<OwnedHandle>,
 }
 impl OwnedChild {
     pub fn process(&mut self) -> Result<&mut Child> {
@@ -179,56 +183,50 @@ impl OwnedChild {
             .ok_or_else(|| Error::new("Windows child has already stopped"))
     }
     pub fn stop(&mut self, cleanup: Option<PathBuf>) {
-        // SAFETY: this wrapper owns the job, and takes its handle exactly once.
-        // Closing the job terminates only processes assigned by this owner.
-        // No handle is moved to the reaper; it receives only the owned std child.
-        if !self.job.is_invalid() {
-            unsafe {
-                let _ = CloseHandle(self.job);
-            }
-            self.job = HANDLE::default();
-        }
-
-        if let Some(child) = self.child.take() {
-            reap(child, cleanup);
-        } else if let Some(path) = cleanup {
-            let _ = std::fs::remove_file(path);
+        let job = self.job.take();
+        let child = self.child.take();
+        if job.is_some() || child.is_some() || cleanup.is_some() {
+            reap(child, job, cleanup);
         }
     }
+
     pub fn spawn(command: &mut Command) -> Result<Self> {
+        Self::spawn_with_flags(command, CREATE_NO_WINDOW.0)
+    }
+    pub fn spawn_background(command: &mut Command) -> Result<Self> {
+        Self::spawn_with_flags(command, CREATE_NO_WINDOW.0 | BELOW_NORMAL_PRIORITY_CLASS.0)
+    }
+    fn spawn_with_flags(command: &mut Command, flags: u32) -> Result<Self> {
         use std::os::windows::process::CommandExt;
         // SAFETY: this function owns the job until it transfers to OwnedChild.
         // Job-information buffers have the documented structure and explicit size.
         // The child process handle is borrowed only while its std owner is alive.
         unsafe {
-            let job = CreateJobObjectW(None, None).map_err(os_error)?;
+            let handle = CreateJobObjectW(None, None).map_err(os_error)?;
+            let job = OwnedHandle::from_raw_handle(handle.0);
             let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
             limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
             if let Err(error) = SetInformationJobObject(
-                job,
+                handle,
                 JobObjectExtendedLimitInformation,
                 (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
                 std::mem::size_of_val(&limits) as u32,
             ) {
-                let _ = CloseHandle(job);
                 return Err(os_error(error));
             }
-            let mut child = match command.creation_flags(CREATE_NO_WINDOW.0).spawn() {
+            let child = match command.creation_flags(flags).spawn() {
                 Ok(child) => child,
                 Err(error) => {
-                    let _ = CloseHandle(job);
                     return Err(error.into());
                 }
             };
-            if let Err(error) = AssignProcessToJobObject(job, HANDLE(child.as_raw_handle())) {
-                let _ = child.kill();
-                reap(child, None);
-                let _ = CloseHandle(job);
+            if let Err(error) = AssignProcessToJobObject(handle, HANDLE(child.as_raw_handle())) {
+                reap(Some(child), Some(job), None);
                 return Err(os_error(error));
             }
             Ok(Self {
                 child: Some(child),
-                job,
+                job: Some(job),
             })
         }
     }
@@ -239,9 +237,16 @@ impl Drop for OwnedChild {
     }
 }
 
-fn reap(mut child: Child, cleanup: Option<PathBuf>) {
+fn reap(child: Option<Child>, job: Option<OwnedHandle>, cleanup: Option<PathBuf>) {
     std::thread::spawn(move || {
-        let _ = child.wait();
+        // Closing a kill-on-close job can enter process and driver teardown.
+        // The reaper owns every handle, so Stop and Close never wait on that path.
+        // Waiting and control-file cleanup follow termination on this worker only.
+        drop(job);
+        if let Some(mut child) = child {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
         if let Some(path) = cleanup {
             let _ = std::fs::remove_file(path);
         }

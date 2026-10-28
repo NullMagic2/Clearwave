@@ -3,8 +3,8 @@ use crate::{
     Error, Result,
     gpu::{Gpu, OPERATOR_GROUP_SIZE, Operator},
     network::{
-        CENTER_FRAME, CONTEXT, CONVOLUTION_CHANNELS, CONVOLUTION_HEIGHT, CONVOLUTION_WIDTH,
-        FEATURES, GAINS, GRUS, PROJECTION_INPUTS, normalization_parameters,
+        CONTEXT, CONVOLUTION_CHANNELS, CONVOLUTION_HEIGHT, CONVOLUTION_WIDTH, FEATURES, GAINS,
+        GRUS, PROJECTION_INPUTS, noise_input_frame, normalization_parameters,
     },
     operators::{GRU_BIAS_BLOCKS, GRU_GATES},
     package::Model,
@@ -202,7 +202,7 @@ impl ResidentGraph {
         b.steps.push(Step::Copy {
             source: input,
             destination: center,
-            source_offset: (CENTER_FRAME * FEATURES * 4) as u64,
+            source_offset: (noise_input_frame(model.profile) * FEATURES * 4) as u64,
             destination_offset: 0,
             bytes: (FEATURES * 4) as u64,
         });

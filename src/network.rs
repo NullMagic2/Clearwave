@@ -3,7 +3,7 @@ use crate::{
     Error, Result,
     gpu::Gpu,
     operators::{self, ConvShape},
-    package::Model,
+    package::{Model, ModelProfile},
     resident::ResidentGraph,
 };
 use serde::Serialize;
@@ -52,14 +52,21 @@ pub struct GraphSpec {
     pub vendor_output_parity: &'static str,
 }
 pub fn specification(model: &Model) -> Result<GraphSpec> {
-    let graph = definition();
+    let graph = definition(model.profile);
     for tensor in &graph.tensors {
         check_size(model, &tensor.name, tensor.stored_shape.iter().product())?;
     }
     Ok(graph)
 }
 
-fn definition() -> GraphSpec {
+pub(crate) fn noise_input_frame(profile: ModelProfile) -> usize {
+    match profile {
+        ModelProfile::RtxVoice => CENTER_FRAME,
+        ModelProfile::Broadcast23 => CONTEXT - 1,
+    }
+}
+
+fn definition(profile: ModelProfile) -> GraphSpec {
     let mut layers = Vec::new();
     let mut tensors = Vec::new();
     let mut channels = 1;
@@ -113,11 +120,14 @@ fn definition() -> GraphSpec {
         operation: "permute channel/time/frequency to time/frequency/channel, then flatten",
     });
     layers.push(LayerSpec {
-        name: "center_frame".into(),
+        name: "noise_input_frame".into(),
         sources: vec!["feature_context".into()],
         input: vec![CONTEXT, FEATURES],
         output: vec![FEATURES],
-        operation: "select context index 3, aligned with the center of the convolution receptive field",
+        operation: match profile {
+            ModelProfile::RtxVoice => "select context index 3 at the convolution center",
+            ModelProfile::Broadcast23 => "select context index 6, the newest feature frame",
+        },
     });
 
     for (index, (name, input, hidden)) in GRUS.into_iter().enumerate() {
@@ -154,7 +164,7 @@ fn definition() -> GraphSpec {
             });
         }
         let source = match index {
-            0 => "center_frame",
+            0 => "noise_input_frame",
             1 => "combined_features",
             _ => GRUS[index - 1].0,
         };
@@ -189,7 +199,14 @@ fn definition() -> GraphSpec {
         output_gains: GAINS,
         layers,
         tensors,
-        layout: "Convolutions NCHW/OIHW; recurrent input is center frame; concatenate recurrent output then frequency-major convolution features",
+        layout: match profile {
+            ModelProfile::RtxVoice => {
+                "Convolutions NCHW/OIHW; recurrent input is center frame; concatenate recurrent output then frequency-major convolution features"
+            }
+            ModelProfile::Broadcast23 => {
+                "Convolutions NCHW/OIHW; recurrent input is newest frame; causal history; concatenate recurrent output then frequency-major convolution features"
+            }
+        },
         vendor_output_parity: "not established; offline waveform adapter implemented with documented boundaries",
     }
 }
@@ -370,7 +387,8 @@ impl<'a> Network<'a> {
             channels = output_channels;
             height -= CONVOLUTION_HEIGHT - 1;
         }
-        let center = &context[CENTER_FRAME * FEATURES..(CENTER_FRAME + 1) * FEATURES];
+        let frame = noise_input_frame(self.model.profile);
+        let center = &context[frame * FEATURES..(frame + 1) * FEATURES];
         let noise = self.gru(0, center, &mut state)?;
         let combined = operators::concatenate_features(&noise, &x, channels, FEATURES)?;
         let mut x = combined;
@@ -598,7 +616,7 @@ mod tests {
 
     #[test]
     fn graph_defines_every_connection_and_stored_tensor() {
-        let graph = definition();
+        let graph = definition(ModelProfile::RtxVoice);
         let mut available: HashSet<&str> = HashSet::from(["feature_context"]);
         for layer in &graph.layers {
             assert!(!layer.sources.is_empty());

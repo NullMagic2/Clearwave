@@ -3,7 +3,7 @@ use crate::{
     Error, Result,
     controls::{
         DESKTOP_EVENT_CAPACITY, DesktopOptions, MAX_CHILD_EVENT_BYTES, MAX_LATENCY_MS,
-        METER_STALE_AFTER, MIN_LATENCY_MS, Preferences, StrengthControl, UI_REFRESH_INTERVAL,
+        METER_STALE_AFTER, MIN_LATENCY_MS, Preferences, ProcessingControl, UI_REFRESH_INTERVAL,
     },
     gpu::AdapterInfo,
     i18n::{Language, Text},
@@ -275,7 +275,7 @@ impl Desktop {
             .parent()
             .ok_or_else(|| Error::new("Settings have no parent directory"))?;
         let control = directory.join(format!("live-control-{}.json", std::process::id()));
-        StrengthControl::write(&control, p.strength)?;
+        ProcessingControl::write(&control, p)?;
         let mut command = Command::new("setpriv");
         command
             .args(["--pdeathsig", "KILL", "--"])
@@ -477,16 +477,17 @@ struct Interface {
     use_default: gtk::Button,
     strength: gtk::Scale,
     percent: gtk::Label,
-    meter: (gtk::LevelBar, gtk::Label),
+    meter: gtk::LevelBar,
     message: gtk::Label,
     settings_message: gtk::Label,
     settings: gtk::Dialog,
-    configuration: gtk::Box,
     bundle: gtk::Entry,
     browse: gtk::Button,
     installer: gtk::Button,
     adapter: gtk::ComboBoxText,
     latency: gtk::SpinButton,
+    echo: gtk::Scale,
+    echo_percent: gtk::Label,
     save: gtk::Button,
     updating: Rc<Cell<bool>>,
     revision: Rc<Cell<u64>>,
@@ -530,7 +531,6 @@ impl Interface {
         let settings_button =
             gtk::Button::from_icon_name(Some("emblem-system-symbolic"), gtk::IconSize::Button);
         settings_button.set_tooltip_text(Some(Language::default().text(Text::Settings)));
-        header.pack_end(&settings_button);
 
         let language_button = gtk::MenuButton::new();
         let language_image = gtk::Image::new();
@@ -561,7 +561,8 @@ impl Interface {
         }
         menu.show_all();
         language_button.set_popup(Some(&menu));
-        header.pack_end(&language_button);
+        header.pack_start(&language_button);
+        header.pack_start(&settings_button);
         window.set_titlebar(Some(&header));
 
         let content = vertical(22);
@@ -604,16 +605,30 @@ impl Interface {
         removal.add(&strength);
         content.add(&removal);
 
+        let echo_panel = vertical(6);
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        row.pack_start(&translated(Text::EchoReduction), true, true, 0);
+        let echo_percent = label("0%");
+        row.pack_end(&echo_percent, false, false, 0);
+        echo_panel.add(&row);
+        let echo = gtk::Scale::with_range(
+            gtk::Orientation::Horizontal,
+            0.0,
+            f64::from(PERCENT_SCALE),
+            1.0,
+        );
+        echo.set_draw_value(false);
+        echo.set_tooltip_text(Some(Language::default().text(Text::EchoTip)));
+        echo_panel.add(&echo);
+        content.add(&echo_panel);
+
         let signal = vertical(8);
         signal.add(&translated(Text::Signal));
         let bar = gtk::LevelBar::for_interval(0.0, 1.0);
         bar.set_hexpand(true);
         bar.set_value(0.0);
         signal.add(&bar);
-        let value = label(Language::default().text(Text::NoSignal));
-        value.style_context().add_class("dim-label");
-        signal.add(&value);
-        let meter = (bar, value);
+        let meter = bar;
         content.add(&signal);
 
         content.add(&gtk::Separator::new(gtk::Orientation::Horizontal));
@@ -735,12 +750,13 @@ impl Interface {
             message,
             settings_message,
             settings,
-            configuration,
             bundle,
             browse,
             installer,
             adapter,
             latency,
+            echo,
+            echo_percent,
             save,
             updating: Rc::new(Cell::new(false)),
             revision: Rc::new(Cell::new(u64::MAX)),
@@ -773,6 +789,8 @@ impl Interface {
             .set_tooltip_text(Some(language.text(Text::RefreshTip)));
         self.strength
             .set_tooltip_text(Some(language.text(Text::StrengthTip)));
+        self.echo
+            .set_tooltip_text(Some(language.text(Text::EchoTip)));
         self.use_default
             .set_tooltip_text(Some(language.text(Text::DefaultTip)));
     }
@@ -803,6 +821,9 @@ impl Interface {
             selected
         }));
         self.bundle.set_text(&state.preferences.active.bundle);
+        self.echo.set_value(
+            f64::from(state.preferences.active.echo_reduction) * f64::from(PERCENT_SCALE),
+        );
         self.latency
             .set_value(state.preferences.active.latency_ms.into());
         self.strength
@@ -841,12 +862,20 @@ impl Interface {
             } else {
                 Text::Browse
             }));
-        self.installer.set_sensitive(state.picker.is_none());
         self.bundle.set_editable(state.picker.is_none());
         self.source.set_sensitive(live.is_none());
         self.refresh.set_sensitive(live.is_none());
-        self.configuration.set_sensitive(live.is_none());
+        self.bundle.set_sensitive(live.is_none());
+        self.browse.set_sensitive(live.is_none());
+        self.installer
+            .set_sensitive(live.is_none() && state.picker.is_none());
+        self.adapter.set_sensitive(live.is_none());
+        self.latency.set_sensitive(live.is_none());
         self.use_default.set_sensitive(ready);
+        self.echo_percent.set_text(&format!(
+            "{:.0}%",
+            state.preferences.active.echo_reduction * PERCENT_SCALE
+        ));
         self.percent.set_text(&format!(
             "{:.0}%",
             state.preferences.active.strength * PERCENT_SCALE
@@ -866,18 +895,13 @@ impl Interface {
             .last_levels
             .is_some_and(|at| at.elapsed() < METER_STALE_AFTER);
         {
-            let (bar, text) = &self.meter;
+            let bar = &self.meter;
             let meter = &state.output;
             let rms = if fresh { meter.rms } else { 0.0 };
             let db = 20.0 * rms.max(MIN_METER_AMPLITUDE).log10();
             bar.set_value(f64::from(
                 ((db + METER_RANGE_DB) / METER_RANGE_DB).clamp(0.0, 1.0),
             ));
-            text.set_text(&if rms > SIGNAL_AMPLITUDE_THRESHOLD {
-                format!("{db:.1} dBFS")
-            } else {
-                language.text(Text::NoSignal).into()
-            });
             bar.set_tooltip_text(Some(&if fresh && meter.peak > SIGNAL_AMPLITUDE_THRESHOLD {
                 format!(
                     "{} {:.1} dBFS",
@@ -978,25 +1002,31 @@ impl Interface {
                 state.changed();
             }
         });
-        let weak = Rc::downgrade(state);
-        let updating = self.updating.clone();
-        self.strength.connect_value_changed(move |scale| {
-            if updating.get() {
-                return;
-            }
-            if let Some(state) = weak.upgrade() {
-                let mut state = state.borrow_mut();
-                state.preferences.active.strength =
-                    (scale.value() / f64::from(PERCENT_SCALE)) as f32;
-                if let Some(live) = &state.live
-                    && let Err(e) =
-                        StrengthControl::write(&live.control, state.preferences.active.strength)
-                {
-                    state.message = Some((true, e.to_string()));
+        for (scale, is_echo) in [(&self.strength, false), (&self.echo, true)] {
+            let weak = Rc::downgrade(state);
+            let updating = self.updating.clone();
+            scale.connect_value_changed(move |scale| {
+                if updating.get() {
+                    return;
                 }
-                state.changed();
-            }
-        });
+                if let Some(state) = weak.upgrade() {
+                    let mut state = state.borrow_mut();
+                    let value = (scale.value() / f64::from(PERCENT_SCALE)) as f32;
+                    if is_echo {
+                        state.preferences.active.echo_reduction = value;
+                    } else {
+                        state.preferences.active.strength = value;
+                    }
+                    if let Some(live) = &state.live
+                        && let Err(error) =
+                            ProcessingControl::write(&live.control, &state.preferences.active)
+                    {
+                        state.message = Some((true, error.to_string()));
+                    }
+                    state.changed();
+                }
+            });
+        }
         let weak = Rc::downgrade(state);
         let updating = self.updating.clone();
         self.bundle.connect_changed(move |entry| {

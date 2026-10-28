@@ -15,6 +15,7 @@ pub fn safetensors(model: &Model, path: &Path) -> Result<()> {
         "__metadata__".into(),
         json!({
             "format":"weights_v0",
+            "model_profile":model.profile,
             "layout":"flat stored order; graph dimensions are separate",
             "package_sha256":model.package_sha256,
             "payload_sha256":model.payload_sha256,

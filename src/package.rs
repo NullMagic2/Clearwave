@@ -15,6 +15,15 @@ const KEY_SEQUENCE_RVA: u32 = 0x194c7;
 const KEY_TABLE_RVA: u32 = 0x33800;
 const KEY_BYTE_OFFSET: u8 = 0x6d;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ModelProfile {
+    #[default]
+    RtxVoice,
+    #[serde(rename = "broadcast-2.3")]
+    Broadcast23,
+}
+
 #[derive(Debug, Serialize)]
 pub struct Tensor {
     pub name: String,
@@ -55,6 +64,7 @@ impl Tensor {
 
 #[derive(Debug)]
 pub struct Model {
+    pub profile: ModelProfile,
     pub format: &'static str,
     pub tensors: Vec<Tensor>,
     pub package_sha256: String,
@@ -76,6 +86,7 @@ impl Model {
         let runtime = bounded_read(runtime, MAX_BYTES)?;
         let clear = decode_package(&package, &runtime)?;
         Ok(Self {
+            profile: ModelProfile::RtxVoice,
             format: "NVnn v1 / weights_v0",
             tensors: parse_weights(&clear)?,
             package_sha256: hash(&package),
@@ -148,6 +159,17 @@ pub fn decode_package(bytes: &[u8], runtime: &[u8]) -> Result<Vec<u8>> {
         return Err(Error::new("Unsupported runtime version/layout"));
     }
     let table = pe::slice_at_rva(runtime, KEY_TABLE_RVA, CIPHER_KEY_BYTES)?;
+    let clear = decrypt_payload(encrypted, iv, table)?;
+    if !clear.starts_with(b"weights_v0") {
+        return Err(Error::new("Decoded payload is not weights_v0"));
+    }
+    Ok(clear)
+}
+
+pub(crate) fn decrypt_payload(encrypted: &[u8], iv: &[u8], table: &[u8]) -> Result<Vec<u8>> {
+    if table.len() != CIPHER_KEY_BYTES || iv.len() != CIPHER_BLOCK_BYTES {
+        return Err(Error::new("Invalid package cipher parameters"));
+    }
     let mut key = [0u8; CIPHER_KEY_BYTES];
     for (i, byte) in table.iter().enumerate() {
         key[i] = byte ^ (i as u8).wrapping_add(KEY_BYTE_OFFSET);
@@ -160,9 +182,6 @@ pub fn decode_package(bytes: &[u8], runtime: &[u8]) -> Result<Vec<u8>> {
     let len = decoded.len();
     key.fill(0);
     clear.truncate(len);
-    if !clear.starts_with(b"weights_v0") {
-        return Err(Error::new("Decoded payload is not weights_v0"));
-    }
     Ok(clear)
 }
 

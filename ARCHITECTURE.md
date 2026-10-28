@@ -1,7 +1,7 @@
 # Architecture
 
 This is a native Linux and Windows Rust 2024 model-loading and AMD-compute application.
-The current binary loads the supplied NVIDIA RTX Voice 0.5.12.6 model package,
+The current binary loads NVIDIA RTX Voice 0.5.12.6 and pinned Broadcast 2.3 audio packages,
 exports named tensors, and processes WAV recordings through a connected network
 on AMD Vulkan hardware. Its waveform adapter runs on the CPU. Vendor audio-output
 parity, speech quality, and device latency remain unverified. A live PipeWire
@@ -17,6 +17,9 @@ endpoint for other applications.
 | --- | --- | --- |
 | `main.rs` | CLI dispatch, bundle extraction, JSON reporting | Implemented |
 | `model_source.rs` | Shared model discovery and validated DLL-free Safetensors loading | Implemented |
+| `model_import.rs` | Cancellable dual-installer import, atomic staging and validated cache | Implemented |
+| `broadcast_import.rs` | Local NGX cache discovery and bounded downloads from NVIDIA | Implemented for the pinned Broadcast 2.3 revision |
+| `broadcast.rs` | Data-only TensorRT weight mapping into the shared graph | Implemented for the pinned Broadcast 2.3 revision |
 | `pe.rs` | Bounded PE section/RVA access | Implemented |
 | `package.rs` | Package decoding, tensor parsing, hashes, inventory | Implemented for supplied package variant |
 | `export.rs` | Safetensors export retaining flat stored order | Implemented |
@@ -28,7 +31,8 @@ endpoint for other applications.
 | `resident.rs` | Persistent Vulkan weights, graph buffers, bindings, dispatch and state commits | Implemented |
 | `wav.rs` | Bounded RIFF parsing, PCM decoding, stereo downmix, float WAV output | Implemented for 48 kHz mono/stereo |
 | `fft.rs` | Mixed-radix complex transform and normalized inverse | Implemented for factors 2/3/5 |
-| `audio.rs` | Spectral features, masks, overlap reconstruction, bounded streaming | Implemented; boundary conventions documented |
+| `audio.rs` | Model-specific windows, mask alignment/strength, overlap reconstruction, bounded streaming | Implemented; boundary conventions documented |
+| `conditioning.rs` | Broadcast block peaks, activity gating, input normalization and matched output compensation | Implemented |
 | `pipewire.rs` | Source enumeration, temporary virtual microphone, stream lifecycle, latency requests | Implemented |
 | `desktop.rs` | Native GTK3 window/settings dialog, device selection, child lifecycle, a measured denoised-signal bar | Implemented |
 | `i18n.rs`, `ui/flags/` | Five UI languages and embedded country flags | Implemented |
@@ -59,7 +63,7 @@ Model package + runtime data --+--> validated payload --> named F32 tensors
                                                                |
                                                        961 noise-mask values
                                                                |
-48 kHz WAV --> Hamming / FFT --> mel power / dB features ---------+
+48 kHz WAV --> Model window / FFT --> mel power / dB features ---------+
                     |                                          |
                     +----> apply (1 - strength * noise mask) <--+
                                       |
@@ -73,13 +77,23 @@ The preferred Safetensors path bypasses the DLL completely and validates the
 32 named F32 tensors against the compiled graph. The Rust/WGSL engine performs
 all inference in both cases.
 
-The payload is `weights_v0`: a 10-byte signature followed by repeated little-endian
+The legacy payload is `weights_v0`: a 10-byte signature followed by repeated little-endian
 name length, UTF-8 name, element count, and IEEE-754 F32 data. Names and dimensions
 are validated before GPU submission. The exported tensor shapes are one-dimensional
 to preserve their stored order. The full execution shapes and connections are
 recorded separately in `docs/model-graph.json`, with mapping evidence in
 `docs/MODEL_GRAPH.md`. The feature graph milestone is complete; waveform feature
 alignment and vendor audio-output parity remain open.
+
+Broadcast imports map its blocked convolution matrices, folded normalization,
+GRU gate ordering and biases, and output projection into the same 32-tensor graph.
+Safetensors metadata records the source model profile. Existing exports without
+this metadata retain their RTX Voice interpretation. Broadcast archive requests
+use bounded HTTPS ranges and verify entry CRCs plus pinned model/decoder hashes.
+The large SDK libraries are not downloaded. These operations run in the existing
+cancellable helper, with parent-death handling on Linux and owned Windows jobs.
+See [Broadcast model support](docs/BROADCAST_MODEL.md) for formats and current
+output-comparison limitations.
 
 ## GPU execution contract
 
@@ -98,22 +112,31 @@ audio latency or steady-state inference benchmark.
 ## Boundaries
 
 - Original-package import is limited to the supplied single-segment package
-  variant and compatible 0.5.12.6 decoder-data layout. DLL-free loading accepts
+  variant and compatible 0.5.12.6 decoder-data layout, plus the pinned Broadcast
+  2.3 package/decoder pair documented above. DLL-free loading accepts
   the matching graph exported as Safetensors. Other graphs fail explicitly.
 - The raw tensor table contains 32 tensors and 15,613,337 F32 parameters.
 - The feature graph uses seven 320-value frames, three convolution/normalization
   stages, four stateful GRUs, and a 961-output sigmoid projection. It exposes
   explicit CPU and AMD paths. See `docs/MODEL_CONTRACT.md` for layout details.
-- The audio adapter uses periodic Hamming analysis and synthesis, a sparse Slaney
-  filterbank, clipped log power, and normalized overlap addition. A shared seven-frame
-  context queue retains spectra and features with constant frame-buffer memory.
-  It begins inference with the first feature arrival and discards three initial
-  masks for virtual spectra while preserving recurrent state. Input,
-  output, and normalization samples remain in memory for offline files.
+- The audio adapter selects periodic Hamming for the legacy model and periodic
+  Hann for Broadcast. Both use a sparse Slaney filterbank, clipped log power,
+  and normalized overlap addition. The shared seven-frame context has bounded
+  memory. Legacy predictions target the centered spectrum and discard three
+  virtual predictions while retaining state. Broadcast feeds the newest feature
+  into the noise GRU and applies each mask to the newest spectrum, with causal
+  history and no lookahead-mask discard.
+- Broadcast uses four-hop input blocks for peak/activity decisions. Its bounded
+  conditioner scales quiet input internally, stores the gain per input hop, and
+  compensates the corresponding reconstructed output hop. Output activity is
+  measured before compensation and affects the next block. Its intensity curve
+  maps the slider in F64 before a uniform F32 spectral blend. Legacy intensity
+  ranking remains separate. Both desktop platforms use this shared processor.
 - The waveform file path pads 1,440 samples before the first input sample and
   flushes three trailing frames. It crops the reconstruction to the original
-  sample count. Complete vendor startup/flush behavior and input-level conditioning are
-  not claimed equivalent. Complete audio-output parity has not been established.
+  sample count. Broadcast instead uses the causal alignment and block conditioner
+  above. Fourteen fixed-criteria comparisons against the NVIDIA runtime on AMD pass;
+  native NVIDIA hardware and general output equivalence remain unverified.
 - The Vulkan graph uploads all model parameters at construction and allocates
   intermediates and bind groups once. Per-step transfers are an 8,960-byte feature
   context and 3,844-byte output mask. Concatenation, channel reordering, dense bias,
@@ -124,8 +147,10 @@ audio latency or steady-state inference benchmark.
   does not advance state. Reset queues GPU buffer clears in submission order.
 - Raw audio streaming uses a 1,920-sample history, a seven-frame context, a
   1,920-sample overlap buffer, and a matching normalization buffer. It emits hops
-  after six hops of algorithmic delay. EOF pads a partial hop, flushes three audio
-  and three feature frames, and crops to the original sample count. Compute errors
+  after six hops of legacy algorithmic delay. Broadcast uses three spectral-delay
+  hops and batches four input hops, adding up to three hops of input wait.
+  EOF pads a partial block, flushes three audio hops plus the model's lookahead,
+  and crops to the original sample count. Compute errors
   end the stream; it must be restarted. The stream creates no audio routes.
 - Vendor model/runtime assets remain external. The built executable embeds only
   this project's code and WGSL shaders; GTK3 remains a system library.
@@ -270,3 +295,18 @@ An installer content hash selects a local cache. Imports validate the supported
 graph and export weights before publishing their directory; failed imports keep
 the prior selected model. Cached models are reused, and a changed installer is
 rejected before cache publication. Vendor executables are never launched.
+
+Windows discovery is isolated by `windows/task.rs`: separate audio and graphics
+commands return bounded JSON with cancellation and a deadline. Job termination,
+process waits, and control-file removal run only on reaper threads. See
+`docs/WINDOWS_LIFECYCLE.md` for the maintenance preview's scope.
+
+## Optional room reverberation reduction
+
+`dereverb.rs` shares the existing spectral pipeline between offline, PipeWire,
+and WASAPI processing. It implements a bounded frame-online WPE predictor,
+controlled independently by the persisted `echo_reduction` fraction. Both native
+main windows expose a 0–100% slider directly below noise removal, defaulting to off. Model features
+and recurrent state receive the original input. Processing stays in audio workers;
+UI changes use the shared atomic `ProcessingControl` file. See
+[echo reduction](docs/ECHO_REDUCTION.md) for parameters, safeguards and limitations.

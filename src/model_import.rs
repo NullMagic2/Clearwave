@@ -7,19 +7,24 @@ use std::{
     fs::{self, File},
     io::Read,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::{Command, ExitStatus, Stdio},
     time::{SystemTime, UNIX_EPOCH},
 };
 
 const HASH_BUFFER_BYTES: usize = 64 * 1024;
 const MAX_INSTALLER_BYTES: u64 = 1024 * 1024 * 1024;
-const ARCHIVE_FILES: [&str; 5] = [
+const ARCHIVE_FILES: [&str; 8] = [
     "NvAFX/nv/NVAudioEffects.dll",
     "NvAFX/models/denoiser_48k.wpkg",
     "NvAFX/nv/EULA.pdf",
     "NvAFX/nv/ThirdPartyLicenses.txt",
     "EULA.txt",
+    "NvMaxineModels/NvMaxineModels.nvi",
+    "NvMaxineClient/nv/common_config.bin",
+    "NvMaxineClient/nv/global_config.bin",
 ];
+const BROADCAST_INSTALLER_SHA256: &str =
+    "c59e4bcbdaee4b56d12447086ee761ca41244ae3e048d1d2a849abb8e106f684";
 const WEIGHTS_FILE: &str = "voice-weights.safetensors";
 
 struct Staging(PathBuf);
@@ -69,43 +74,60 @@ fn archiver() -> PathBuf {
     }
     PathBuf::from("7z")
 }
-pub fn extract(installer: &Path, destination: &Path) -> Result<()> {
-    let installer = installer.canonicalize()?;
-    fs::create_dir(destination)?;
-    let destination = destination.canonicalize()?;
-    let tool = archiver();
-
+pub(crate) fn tool_command(tool: impl AsRef<std::ffi::OsStr>) -> Command {
     #[cfg(target_os = "linux")]
-    let mut command = {
+    let command = {
         let mut command = Command::new("setpriv");
         command.args(["--pdeathsig", "KILL", "--"]).arg(tool);
         command
     };
     #[cfg(windows)]
-    let mut command = Command::new(tool);
+    let command = Command::new(tool);
+
+    command
+}
+pub(crate) fn run_tool(command: &mut Command) -> Result<ExitStatus> {
+    #[cfg(target_os = "linux")]
+    let status = command.status().map_err(Error::from);
+    #[cfg(windows)]
+    let status = crate::windows::OwnedChild::spawn(command)
+        .and_then(|mut child| child.process()?.wait().map_err(Error::from));
+    status
+}
+pub fn extract(installer: &Path, destination: &Path) -> Result<()> {
+    let installer = installer.canonicalize()?;
+    fs::create_dir(destination)?;
+    let destination = destination.canonicalize()?;
+    let mut command = tool_command(archiver());
 
     command
         .args(["x", "-y", "-bd"])
         .arg(format!("-o{}", destination.display()))
-        .arg(installer)
+        .arg(&installer)
         .args(ARCHIVE_FILES)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    #[cfg(target_os = "linux")]
-    let status = command.status();
-    #[cfg(windows)]
-    let status = crate::windows::OwnedChild::spawn(&mut command)
-        .and_then(|mut child| child.process()?.wait().map_err(Error::from));
-    let status = status.map_err(|error| {
+    let status = run_tool(&mut command).map_err(|error| {
         Error::new(format!(
             "Cannot extract installer: install 7-Zip and try again ({error})"
         ))
     })?;
     if !status.success() {
         return Err(Error::new(
-            "7-Zip could not extract the supported RTX Voice model bundle",
+            "7-Zip could not extract the RTX Voice or Broadcast installer",
         ));
+    }
+    if destination
+        .join("NvMaxineModels/NvMaxineModels.nvi")
+        .is_file()
+    {
+        if fingerprint(&installer)? != BROADCAST_INSTALLER_SHA256 {
+            return Err(Error::new(
+                "This Broadcast installer revision is not supported; select NVIDIA Broadcast 2.3.0.71988672",
+            ));
+        }
+        crate::broadcast_import::prepare(&installer, &destination)?;
     }
     let model = ModelSource::resolve(&destination)?.load()?;
     network::specification(&model)?;
@@ -120,7 +142,9 @@ pub fn prepare(installer: &Path) -> Result<PathBuf> {
 }
 pub fn prepare_in(installer: &Path, cache: &Path) -> Result<PathBuf> {
     if !installer.is_file() || !is_installer(installer) {
-        return Err(Error::new("Select the RTX Voice installer executable"));
+        return Err(Error::new(
+            "Select an RTX Voice or NVIDIA Broadcast installer executable",
+        ));
     }
     let identity = fingerprint(installer)?;
     let destination = cache.join(&identity);

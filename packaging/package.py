@@ -84,6 +84,10 @@ def main():
         install(PROJECT/'packaging/clearwave.svg', base/'usr/share/icons/hicolor/scalable/apps/clearwave.svg')
         doc = base/'usr/share/doc/clearwave'
         install(PROJECT/'README.md', doc/'README.md')
+        install(PROJECT/'docs/linux-frontend.png', doc/'docs/linux-frontend.png')
+        install(PROJECT/'docs/BROADCAST_MODEL.md', doc/'docs/BROADCAST_MODEL.md')
+        install(PROJECT/'docs/broadcast-comparison.json', doc/'docs/broadcast-comparison.json')
+        install(PROJECT/'docs/ECHO_REDUCTION.md', doc/'ECHO_REDUCTION.md')
         install(PROJECT/'LICENSE', doc/'LICENSE')
         install(PROJECT/'Cargo.lock', doc/'Cargo.lock')
         install(PROJECT/'ui/flags/LICENSE', doc/'flag-icons-LICENSE')
@@ -110,7 +114,7 @@ def main():
                 'Section: sound\nPriority: optional\nMaintainer: Local application build <noreply@localhost>\n'
                 f'Installed-Size: {installed_size}\nDepends: {DEPENDENCIES}\n'
                 'Conflicts: rtx-voice-amd\nReplaces: rtx-voice-amd\n'
-                'Recommends: mesa-vulkan-drivers\nSuggests: 7zip | p7zip-full\n'
+                'Recommends: mesa-vulkan-drivers\nSuggests: 7zip | p7zip-full, curl\n'
                 f'Description: Native microphone denoising controls for {label}\n'
                 ' GTK3 interface with AMD Vulkan processing and a PipeWire virtual microphone.\n'
                 ' NVIDIA model and runtime files are not included; provide a local model bundle.\n')

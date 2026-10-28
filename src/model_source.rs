@@ -1,8 +1,8 @@
-//! Local model discovery and DLL-free loading of the supported exported graph.
+//! Resolve legacy and Broadcast packages or validated DLL-free model exports.
 use crate::{
     Error, Result,
     network::SUPPORTED_TENSOR_COUNT,
-    package::{MAX_TENSORS, Model, Tensor, hash},
+    package::{MAX_TENSORS, Model, ModelProfile, Tensor, hash},
     storage::bounded_read,
 };
 use safetensors::{Dtype, SafeTensors};
@@ -18,6 +18,10 @@ pub enum ModelSource {
         weights: PathBuf,
         decoder_data: PathBuf,
     },
+    Broadcast {
+        weights: PathBuf,
+        decoder_data: PathBuf,
+    },
 }
 impl ModelSource {
     pub fn resolve(location: &Path) -> Result<Self> {
@@ -29,7 +33,7 @@ impl ModelSource {
                 Ok(Self::Safetensors(location.to_owned()))
             } else {
                 Err(Error::new(
-                    "Select a model folder, .safetensors file, or RTX Voice installer",
+                    "Select a model folder, .safetensors file, or RTX Voice / Broadcast installer",
                 ))
             };
         }
@@ -38,6 +42,14 @@ impl ModelSource {
             if path.is_file() {
                 return Ok(Self::Safetensors(path));
             }
+        }
+        let weights = location.join("denoiser_48k.trtpkg");
+        let decoder_data = location.join("nvafxdenoiser.dll");
+        if weights.is_file() && decoder_data.is_file() {
+            return Ok(Self::Broadcast {
+                weights,
+                decoder_data,
+            });
         }
         for (weights, decoder_data) in [
             ("denoiser_48k.wpkg", "NVAudioEffects.dll"),
@@ -56,11 +68,15 @@ impl ModelSource {
             }
         }
         Err(Error::new(
-            "No supported model found: place voice-weights.safetensors or model.safetensors directly in the selected folder for DLL-free loading. Original encrypted packages need denoiser_48k.wpkg and NVAudioEffects.dll together in the root folder, or in the NvAFX/models and NvAFX/nv subfolders.",
+            "No supported model found: place voice-weights.safetensors or model.safetensors directly in the selected folder for DLL-free loading. RTX Voice packages need denoiser_48k.wpkg and NVAudioEffects.dll together, or in NvAFX/models and NvAFX/nv. Broadcast 2.3 packages need denoiser_48k.trtpkg and nvafxdenoiser.dll together. You can also select a supported installer.",
         ))
     }
     pub fn load(&self) -> Result<Model> {
         match self {
+            Self::Broadcast {
+                weights,
+                decoder_data,
+            } => crate::broadcast::load(weights, decoder_data),
             Self::Package {
                 weights,
                 decoder_data,
@@ -74,6 +90,7 @@ impl ModelSource {
                     ));
                 }
                 let model = Model {
+                    profile: profile(&bytes)?,
                     format: "Safetensors F32 / Clearwave graph",
                     tensors,
                     package_sha256: hash(&bytes),
@@ -84,6 +101,21 @@ impl ModelSource {
                 Ok(model)
             }
         }
+    }
+}
+
+fn profile(bytes: &[u8]) -> Result<ModelProfile> {
+    let (_, metadata) = SafeTensors::read_metadata(bytes)
+        .map_err(|error| Error::new(format!("Invalid Safetensors metadata: {error}")))?;
+    match metadata
+        .metadata()
+        .as_ref()
+        .and_then(|values| values.get("model_profile"))
+        .map(String::as_str)
+    {
+        None | Some("rtx-voice") => Ok(ModelProfile::RtxVoice),
+        Some("broadcast-2.3") => Ok(ModelProfile::Broadcast23),
+        Some(value) => Err(Error::new(format!("Unsupported model profile: {value}"))),
     }
 }
 
@@ -176,6 +208,17 @@ mod tests {
             );
         }
         let dir = Directory::new();
+        let weights = dir.file("denoiser_48k.trtpkg");
+        assert!(ModelSource::resolve(&dir.0).is_err());
+        let decoder_data = dir.file("nvafxdenoiser.dll");
+        assert_eq!(
+            ModelSource::resolve(&dir.0).unwrap(),
+            ModelSource::Broadcast {
+                weights,
+                decoder_data
+            }
+        );
+        let dir = Directory::new();
         let exported = dir.file("model.safetensors");
         assert_eq!(
             ModelSource::resolve(&dir.0).unwrap(),
@@ -221,6 +264,7 @@ mod tests {
         let dir = Directory::new();
         let path = dir.0.join("voice-weights.safetensors");
         let model = Model {
+            profile: ModelProfile::RtxVoice,
             format: "test",
             tensors: vec![Tensor {
                 name: "w".into(),
@@ -231,11 +275,25 @@ mod tests {
             payload_sha256: String::new(),
         };
         crate::export::safetensors(&model, &path).unwrap();
+        assert_eq!(
+            profile(&std::fs::read(&path).unwrap()).unwrap(),
+            ModelProfile::RtxVoice
+        );
         let decoded = decode_safetensors(&std::fs::read(&path).unwrap())
             .unwrap()
             .0;
         assert_eq!(decoded[0].name, "w");
         assert_eq!(decoded[0].values, model.tensors[0].values);
         assert!(ModelSource::Safetensors(path).load().is_err());
+        let path = dir.0.join("broadcast.safetensors");
+        let model = Model {
+            profile: ModelProfile::Broadcast23,
+            ..model
+        };
+        crate::export::safetensors(&model, &path).unwrap();
+        assert_eq!(
+            profile(&std::fs::read(&path).unwrap()).unwrap(),
+            ModelProfile::Broadcast23
+        );
     }
 }

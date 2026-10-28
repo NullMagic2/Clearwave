@@ -1,0 +1,155 @@
+{
+  "criteria": {
+    "minimum_output_snr_db": 40.0,
+    "minimum_correlation": 0.9999,
+    "maximum_voice_band_gain_difference_db": 0.05
+  },
+  "cases": {
+    "voice0-bypass": {
+      "strength": 0,
+      "input_sha256": "88f66d99d5ca4b94fbbad017f163836a73860b1aeede55d3445cda19bd207c1f",
+      "correlation": 0.9999999999999892,
+      "output_snr_db": 136.7385611014454,
+      "max_voice_band_gain_difference_db": 1.6007945323991135e-07,
+      "reference_clean_snr_db": 9.467480683948605,
+      "candidate_clean_snr_db": 9.467480668529035,
+      "passed": true
+    },
+    "voice0-clean": {
+      "strength": 1,
+      "input_sha256": "ba4af11e6af8142b035a6a423b114da0ecff2af43e9043cbc41a1b168e03ef64",
+      "correlation": 0.9999999994580993,
+      "output_snr_db": 89.64672110801777,
+      "max_voice_band_gain_difference_db": 8.990421261214666e-06,
+      "reference_clean_snr_db": 40.08848956520451,
+      "candidate_clean_snr_db": 40.10480913502483,
+      "passed": true
+    },
+    "voice0-half": {
+      "strength": 0.5,
+      "input_sha256": "88f66d99d5ca4b94fbbad017f163836a73860b1aeede55d3445cda19bd207c1f",
+      "correlation": 0.999997795700251,
+      "output_snr_db": 53.48087324293768,
+      "max_voice_band_gain_difference_db": 0.005166492103893305,
+      "reference_clean_snr_db": 14.804192539035142,
+      "candidate_clean_snr_db": 14.824381045539276,
+      "passed": true
+    },
+    "voice0-quiet-clean": {
+      "strength": 1,
+      "input_sha256": "aed86eba843745bb737d83a91e24e8af29449039f90a3913a443f8c795c44328",
+      "correlation": 0.9999996548329968,
+      "output_snr_db": 61.59860864341303,
+      "max_voice_band_gain_difference_db": 0.0006379755224653338,
+      "reference_clean_snr_db": 17.37647014743341,
+      "candidate_clean_snr_db": 17.36663701616876,
+      "passed": true
+    },
+    "voice0-quiet-noisy": {
+      "strength": 1,
+      "input_sha256": "6d2895e45ebaeb0461f3f6aff3b7ff5f46b2425b13ad7598fe9704f1a44424d6",
+      "correlation": 0.9999975784902481,
+      "output_snr_db": 53.141523488326996,
+      "max_voice_band_gain_difference_db": 0.006136556943979521,
+      "reference_clean_snr_db": 14.903401525900017,
+      "candidate_clean_snr_db": 14.903673918644692,
+      "passed": true
+    },
+    "voice1-clean": {
+      "strength": 1,
+      "input_sha256": "54cf23c2c9aa5746306e0e940e4baa79872ee3e285f196a90b19c53f3fd1a254",
+      "correlation": 0.9999998998386546,
+      "output_snr_db": 66.96897374538761,
+      "max_voice_band_gain_difference_db": 0.0012708040006271515,
+      "reference_clean_snr_db": 21.913911119770443,
+      "candidate_clean_snr_db": 21.891645664000748,
+      "passed": true
+    },
+    "voice1-noisy": {
+      "strength": 1,
+      "input_sha256": "f07a78a3ea686bc3eebad3be9261e2bc2c99b6659bbe82112962e9f6ba7a15de",
+      "correlation": 0.9999997873742555,
+      "output_snr_db": 63.71310709735128,
+      "max_voice_band_gain_difference_db": 0.0016015843327771284,
+      "reference_clean_snr_db": 17.182393716637073,
+      "candidate_clean_snr_db": 17.178956450772546,
+      "passed": true
+    },
+    "voice0-knee": {
+      "strength": 0.3,
+      "input_sha256": "88f66d99d5ca4b94fbbad017f163836a73860b1aeede55d3445cda19bd207c1f",
+      "correlation": 0.99999870746872,
+      "output_snr_db": 55.79365646449741,
+      "max_voice_band_gain_difference_db": 0.0039047051734526494,
+      "reference_clean_snr_db": 13.752914636475058,
+      "candidate_clean_snr_db": 13.767088271609886,
+      "passed": true
+    },
+    "voice0-quarter": {
+      "strength": 0.25,
+      "input_sha256": "88f66d99d5ca4b94fbbad017f163836a73860b1aeede55d3445cda19bd207c1f",
+      "correlation": 0.999998952732253,
+      "output_snr_db": 56.70574800221768,
+      "max_voice_band_gain_difference_db": 0.003501861497556713,
+      "reference_clean_snr_db": 13.345873799932368,
+      "candidate_clean_snr_db": 13.358053866685902,
+      "passed": true
+    },
+    "voice0-quiet-bypass": {
+      "strength": 0,
+      "input_sha256": "6d2895e45ebaeb0461f3f6aff3b7ff5f46b2425b13ad7598fe9704f1a44424d6",
+      "correlation": 0.9999999999999897,
+      "output_snr_db": 136.3812054119896,
+      "max_voice_band_gain_difference_db": 1.8567237160954653e-07,
+      "reference_clean_snr_db": 9.467480516445951,
+      "candidate_clean_snr_db": 9.46748049636523,
+      "passed": true
+    },
+    "voice0-threequarters": {
+      "strength": 0.75,
+      "input_sha256": "88f66d99d5ca4b94fbbad017f163836a73860b1aeede55d3445cda19bd207c1f",
+      "correlation": 0.9999967838185875,
+      "output_snr_db": 51.845436090663796,
+      "max_voice_band_gain_difference_db": 0.0057429475742170055,
+      "reference_clean_snr_db": 15.269950556353642,
+      "candidate_clean_snr_db": 15.294386855070204,
+      "passed": true
+    },
+    "voice0-eighttenths": {
+      "strength": 0.8,
+      "input_sha256": "88f66d99d5ca4b94fbbad017f163836a73860b1aeede55d3445cda19bd207c1f",
+      "correlation": 0.9999964222144899,
+      "output_snr_db": 51.35618953382238,
+      "max_voice_band_gain_difference_db": 0.007196951502102644,
+      "reference_clean_snr_db": 15.319335928196187,
+      "candidate_clean_snr_db": 15.344534340930451,
+      "passed": true
+    },
+    "voice0-ninetenths": {
+      "strength": 0.9,
+      "input_sha256": "88f66d99d5ca4b94fbbad017f163836a73860b1aeede55d3445cda19bd207c1f",
+      "correlation": 0.9999956138279407,
+      "output_snr_db": 50.46829089298933,
+      "max_voice_band_gain_difference_db": 0.007455705266429025,
+      "reference_clean_snr_db": 15.325961833612807,
+      "candidate_clean_snr_db": 15.351600060515523,
+      "passed": true
+    },
+    "voice0-full": {
+      "strength": 1,
+      "input_sha256": "88f66d99d5ca4b94fbbad017f163836a73860b1aeede55d3445cda19bd207c1f",
+      "correlation": 0.9999953984536722,
+      "output_snr_db": 50.261141615246586,
+      "max_voice_band_gain_difference_db": 0.0076548149345236904,
+      "reference_clean_snr_db": 15.32658094701448,
+      "candidate_clean_snr_db": 15.352077805685838,
+      "passed": true
+    }
+  },
+  "scope": "NVIDIA Broadcast 2.3 audio runtime on AMD compatibility stack; no native NVIDIA hardware reference; fixed 3360-sample reference delay; no gain normalization",
+  "version": "0.7.1-dev.4",
+  "echo_reduction": 0,
+  "adapter": "AMD Radeon RX 7900 XTX (RADV NAVI31)",
+  "date": "2026-10-28",
+  "notes": "Aggregate results only. Reference audio/model assets are external. Native NVIDIA hardware and general bitwise equivalence are unverified."
+}
