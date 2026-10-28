@@ -1,4 +1,5 @@
-//! Offline 48 kHz spectral adapter. The frame queue has constant memory usage.
+//! Convert waveform audio to model features and reconstruct masked spectra.
+//! Offline and live paths share bounded context priming and spectral processing.
 use crate::{
     Error, Result,
     fft::{Complex, Fft},
@@ -10,10 +11,72 @@ pub const RATE: usize = 48000;
 pub const TRANSFORM: usize = 1920;
 pub const HOP: usize = 480;
 const PREFIX: usize = TRANSFORM - HOP;
+const PREFIX_HOPS: usize = PREFIX / HOP;
+pub const CONTEXT_RADIUS: usize = CONTEXT / 2;
+pub const ALGORITHMIC_DELAY_SAMPLES: usize = PREFIX + CONTEXT_RADIUS * HOP;
+pub const MAX_SAMPLE_AMPLITUDE: f32 = 16.0;
+const MAX_SAMPLES: usize = 32 * 1024 * 1024;
+const MEL_LINEAR_FREQUENCY: f32 = 1000.0;
+const MEL_LINEAR_SCALE: f32 = 200.0 / 3.0;
+const MEL_LINEAR_BANDS: f32 = 15.0;
+const MEL_LOG_RANGE: f32 = 6.4;
+const MEL_LOG_BANDS: f32 = 27.0;
+const MIN_FEATURE_POWER: f32 = 1.0 / (1 << 24) as f32;
+const FEATURE_POWER_OFFSET_DB: f32 = 40.0;
+const FEATURE_POWER_RANGE_DB: f32 = 88.0;
+const HAMMING_OFFSET: f32 = 0.54;
+const HAMMING_COSINE: f32 = 0.46;
+const TOP_NOISE_BIN_FRACTION: f32 = 0.2;
 
 struct Frame {
     spectrum: Vec<Complex>,
     features: Vec<f32>,
+}
+struct Prediction {
+    spectrum: Vec<Complex>,
+    noise: Vec<f32>,
+}
+struct FrameContext {
+    frames: VecDeque<Frame>,
+}
+impl Frame {
+    fn padding() -> Self {
+        Self {
+            spectrum: Vec::new(),
+            features: vec![0.0; FEATURES],
+        }
+    }
+}
+impl FrameContext {
+    fn new() -> Self {
+        Self {
+            frames: (0..CONTEXT - 1).map(|_| Frame::padding()).collect(),
+        }
+    }
+    fn push(
+        &mut self,
+        frame: Frame,
+        predict: &mut impl FnMut(&[f32]) -> Result<Vec<f32>>,
+    ) -> Result<Option<Prediction>> {
+        self.frames.push_back(frame);
+        let mut context = Vec::with_capacity(CONTEXT * FEATURES);
+        for frame in &self.frames {
+            context.extend_from_slice(&frame.features);
+        }
+        let noise = predict(&context)?;
+
+        // Advance recurrent state from the first arriving feature frame.
+        // Initial predictions target virtual spectra before the waveform starts.
+        // Discard those masks while retaining the model's resulting hidden states.
+        let spectrum = std::mem::take(&mut self.frames[CONTEXT_RADIUS].spectrum);
+        self.frames.pop_front();
+        if spectrum.is_empty() {
+            validate_mask(&noise)?;
+            Ok(None)
+        } else {
+            Ok(Some(Prediction { spectrum, noise }))
+        }
+    }
 }
 pub struct Processor {
     fft: Fft,
@@ -21,21 +84,23 @@ pub struct Processor {
     filters: Vec<Vec<(usize, f32)>>,
 }
 fn mel(f: f32) -> f32 {
-    if f < 1000.0 {
-        f / (200.0 / 3.0)
+    if f < MEL_LINEAR_FREQUENCY {
+        f / MEL_LINEAR_SCALE
     } else {
-        15.0 + (f / 1000.0).ln() / (6.4f32.ln() / 27.0)
+        MEL_LINEAR_BANDS + (f / MEL_LINEAR_FREQUENCY).ln() / (MEL_LOG_RANGE.ln() / MEL_LOG_BANDS)
     }
 }
 fn frequency(m: f32) -> f32 {
-    if m < 15.0 {
-        m * (200.0 / 3.0)
+    if m < MEL_LINEAR_BANDS {
+        m * MEL_LINEAR_SCALE
     } else {
-        1000.0 * ((m - 15.0) * (6.4f32.ln() / 27.0)).exp()
+        MEL_LINEAR_FREQUENCY * ((m - MEL_LINEAR_BANDS) * (MEL_LOG_RANGE.ln() / MEL_LOG_BANDS)).exp()
     }
 }
 fn scale_power(power: f32) -> f32 {
-    ((10.0 * power.max(2.0f32.powi(-24)).log10() + 40.0) / 88.0).clamp(0.0, 1.0)
+    ((10.0 * power.max(MIN_FEATURE_POWER).log10() + FEATURE_POWER_OFFSET_DB)
+        / FEATURE_POWER_RANGE_DB)
+        .clamp(0.0, 1.0)
 }
 pub fn validate_strength(strength: f32) -> Result<()> {
     if !strength.is_finite() || !(0.0..=1.0).contains(&strength) {
@@ -48,7 +113,10 @@ pub fn validate_strength(strength: f32) -> Result<()> {
 impl Processor {
     pub fn new() -> Result<Self> {
         let window = (0..TRANSFORM)
-            .map(|n| 0.54 - 0.46 * (std::f32::consts::TAU * n as f32 / TRANSFORM as f32).cos())
+            .map(|n| {
+                HAMMING_OFFSET
+                    - HAMMING_COSINE * (std::f32::consts::TAU * n as f32 / TRANSFORM as f32).cos()
+            })
             .collect();
         let upper = mel(RATE as f32 / 2.0);
         let edges: Vec<_> = (0..FEATURES + 2)
@@ -106,18 +174,11 @@ impl Processor {
         noise: &[f32],
         strength: f32,
     ) -> Result<Vec<Complex>> {
-        if noise.len() != GAINS
-            || noise
-                .iter()
-                .any(|n| !n.is_finite() || !(0.0..=1.0).contains(n))
-        {
-            return Err(Error::new(
-                "Expected 961 finite noise-mask values from 0 to 1",
-            ));
-        }
-        // Keep full suppression for the strongest predicted-noise bins. Ease
-        // weaker bins with the selected strength to retain quieter speech detail.
-        let top = (GAINS as f32 * 0.2 * strength) as usize;
+        validate_mask(noise)?;
+        // Suppress the strongest predicted-noise bins at full model strength.
+        // Scale the remaining bins with the selected removal setting.
+        // This preserves the runtime's noise-power ranking at lower intensity.
+        let top = (GAINS as f32 * TOP_NOISE_BIN_FRACTION * strength) as usize;
         let threshold = if top == 0 {
             f32::MAX
         } else if strength == 1.0 {
@@ -151,16 +212,6 @@ impl Processor {
         }
         self.fft.transform(&spectrum, true)
     }
-    fn padded(&self, samples: &[f32], frame: i64, count: usize) -> Result<Frame> {
-        if frame < 0 || frame as usize >= count {
-            Ok(Frame {
-                spectrum: Vec::new(),
-                features: vec![0.0; FEATURES],
-            })
-        } else {
-            self.analyze(samples, frame as usize)
-        }
-    }
     pub fn features(
         &self,
         samples: &[f32],
@@ -182,21 +233,22 @@ impl Processor {
         check_samples(samples)?;
         validate_strength(strength)?;
         let count = Self::frame_count(samples.len());
-        let mut queue = VecDeque::with_capacity(CONTEXT);
-        for i in -3..=3 {
-            queue.push_back(self.padded(samples, i, count)?);
-        }
+        let mut context = FrameContext::new();
         let mut output = vec![0.0; samples.len()];
         let mut normalization = vec![0.0; samples.len()];
-        let mut context = Vec::with_capacity(CONTEXT * FEATURES);
-        for frame in 0..count {
-            context.clear();
-            for entry in &queue {
-                context.extend_from_slice(&entry.features);
-            }
-            let noise = predict(&context)?;
-            let time = self.synthesize(&queue[3].spectrum, &noise, strength)?;
-            let start = frame as i64 * HOP as i64 - PREFIX as i64;
+        let mut processed = 0;
+
+        for frame in 0..count + CONTEXT_RADIUS {
+            let frame = if frame < count {
+                self.analyze(samples, frame)?
+            } else {
+                Frame::padding()
+            };
+            let Some(prediction) = context.push(frame, &mut predict)? else {
+                continue;
+            };
+            let time = self.synthesize(&prediction.spectrum, &prediction.noise, strength)?;
+            let start = processed as i64 * HOP as i64 - PREFIX as i64;
             for (i, value) in time.iter().enumerate() {
                 let pos = start + i as i64;
                 if pos >= 0 && (pos as usize) < samples.len() {
@@ -205,10 +257,7 @@ impl Processor {
                     normalization[p] += self.window[i] * self.window[i];
                 }
             }
-            queue.pop_front();
-            if frame + 1 < count {
-                queue.push_back(self.padded(samples, frame as i64 + 4, count)?);
-            }
+            processed += 1;
         }
         for (value, norm) in output.iter_mut().zip(normalization) {
             if norm <= 0.0 {
@@ -225,13 +274,14 @@ impl Processor {
     }
 }
 
-/// Incremental adapter with 480-sample hops and 2,880 samples of algorithmic delay.
-/// Each push accepts at most one hop; finish flushes and crops the finite tail.
+/// Incremental adapter accepts one model hop per push.
+/// Context lookahead and window overlap determine the fixed algorithmic delay.
+/// Finishing flushes the finite tail and preserves the original sample count.
 pub struct StreamProcessor {
     processor: Processor,
     history: VecDeque<f32>,
     pending: Vec<f32>,
-    frames: VecDeque<Frame>,
+    context: FrameContext,
     overlap: Vec<f32>,
     normalization: Vec<f32>,
     processed: u64,
@@ -241,17 +291,11 @@ pub struct StreamProcessor {
 }
 impl StreamProcessor {
     pub fn new() -> Result<Self> {
-        let frames = (0..3)
-            .map(|_| Frame {
-                spectrum: Vec::new(),
-                features: vec![0.0; FEATURES],
-            })
-            .collect();
         Ok(Self {
             processor: Processor::new()?,
             history: vec![0.0; TRANSFORM].into(),
             pending: Vec::with_capacity(HOP * 2),
-            frames,
+            context: FrameContext::new(),
             overlap: vec![0.0; TRANSFORM],
             normalization: vec![0.0; TRANSFORM],
             processed: 0,
@@ -273,7 +317,11 @@ impl StreamProcessor {
             return Err(Error::new("Audio stream is already finished"));
         }
         validate_strength(strength)?;
-        if samples.len() > HOP || samples.iter().any(|v| !v.is_finite() || v.abs() > 16.0) {
+        if samples.len() > HOP
+            || samples
+                .iter()
+                .any(|v| !v.is_finite() || v.abs() > MAX_SAMPLE_AMPLITUDE)
+        {
             return Err(Error::new(
                 "Stream chunks must contain at most 480 finite samples within ±16",
             ));
@@ -306,24 +354,17 @@ impl StreamProcessor {
         if self.received == 0 {
             return Ok(Vec::new());
         }
-        let mut output = Vec::with_capacity(HOP * 7);
+        let mut output = Vec::with_capacity(HOP * CONTEXT);
         if !self.pending.is_empty() {
             let mut hop = std::mem::take(&mut self.pending);
             hop.resize(HOP, 0.0);
             output.extend(self.append_hop(&hop, strength, predict)?);
         }
-        for _ in 0..3 {
+        for _ in 0..PREFIX_HOPS {
             output.extend(self.append_hop(&[0.0; HOP], strength, predict)?);
         }
-        for _ in 0..3 {
-            output.extend(self.append_frame(
-                Frame {
-                    spectrum: Vec::new(),
-                    features: vec![0.0; FEATURES],
-                },
-                strength,
-                predict,
-            )?);
+        for _ in 0..CONTEXT_RADIUS {
+            output.extend(self.append_frame(Frame::padding(), strength, predict)?);
         }
         if self.emitted != self.received {
             return Err(Error::new(
@@ -358,25 +399,19 @@ impl StreamProcessor {
         strength: f32,
         predict: &mut impl FnMut(&[f32]) -> Result<Vec<f32>>,
     ) -> Result<Vec<f32>> {
-        self.frames.push_back(frame);
-        if self.frames.len() < CONTEXT {
+        let Some(prediction) = self.context.push(frame, predict)? else {
             return Ok(Vec::new());
-        }
-        let mut context = Vec::with_capacity(CONTEXT * FEATURES);
-        for frame in &self.frames {
-            context.extend_from_slice(&frame.features);
-        }
-        let noise = predict(&context)?;
+        };
         let time = self
             .processor
-            .synthesize(&self.frames[3].spectrum, &noise, strength)?;
+            .synthesize(&prediction.spectrum, &prediction.noise, strength)?;
         for (i, sample) in time.iter().enumerate() {
             let w = self.processor.window[i];
             self.overlap[i] += sample.re * w;
             self.normalization[i] += w * w;
         }
         let mut output = Vec::with_capacity(HOP);
-        if self.processed >= 3 {
+        if self.processed >= PREFIX_HOPS as u64 {
             let count = (self.received - self.emitted).min(HOP as u64) as usize;
             for i in 0..count {
                 let value = self.overlap[i] / self.normalization[i];
@@ -391,15 +426,28 @@ impl StreamProcessor {
         self.overlap[TRANSFORM - HOP..].fill(0.0);
         self.normalization.rotate_left(HOP);
         self.normalization[TRANSFORM - HOP..].fill(0.0);
-        self.frames.pop_front();
         self.processed += 1;
         Ok(output)
     }
 }
+fn validate_mask(noise: &[f32]) -> Result<()> {
+    if noise.len() != GAINS
+        || noise
+            .iter()
+            .any(|n| !n.is_finite() || !(0.0..=1.0).contains(n))
+    {
+        return Err(Error::new(
+            "Expected 961 finite noise-mask values from 0 to 1",
+        ));
+    }
+    Ok(())
+}
 fn check_samples(samples: &[f32]) -> Result<()> {
     if samples.is_empty()
-        || samples.len() > 32 * 1024 * 1024
-        || samples.iter().any(|x| !x.is_finite() || x.abs() > 16.0)
+        || samples.len() > MAX_SAMPLES
+        || samples
+            .iter()
+            .any(|x| !x.is_finite() || x.abs() > MAX_SAMPLE_AMPLITUDE)
     {
         return Err(Error::new(
             "Expected 1–33554432 finite audio samples within ±16",
@@ -411,6 +459,49 @@ fn check_samples(samples: &[f32]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn context_primes_state_before_the_first_waveform_mask() {
+        const ARRIVAL_MARKERS: [f32; 4] = [1.0, 2.0, 3.0, 4.0];
+        const EXPECTED_FIRST_MASK: f32 = 0.1;
+        const STATE_SCALE: f32 = 100.0;
+        let mut queue = FrameContext::new();
+        let mut accumulated = 0.0;
+        let mut calls = 0;
+
+        for marker in ARRIVAL_MARKERS {
+            let prediction = queue
+                .push(
+                    Frame {
+                        spectrum: vec![
+                            Complex {
+                                re: marker,
+                                im: 0.0
+                            };
+                            TRANSFORM
+                        ],
+                        features: vec![marker; FEATURES],
+                    },
+                    &mut |context| {
+                        calls += 1;
+                        assert_eq!(context.len(), CONTEXT * FEATURES);
+                        assert_eq!(context[(CONTEXT - 1) * FEATURES], marker);
+                        accumulated += marker;
+                        Ok(vec![accumulated / STATE_SCALE; GAINS])
+                    },
+                )
+                .unwrap();
+            if marker < ARRIVAL_MARKERS[ARRIVAL_MARKERS.len() - 1] {
+                assert!(prediction.is_none());
+            } else {
+                let prediction = prediction.unwrap();
+                assert_eq!(prediction.spectrum[0].re, ARRIVAL_MARKERS[0]);
+                assert_eq!(prediction.noise[0], EXPECTED_FIRST_MASK);
+            }
+            assert_eq!(queue.frames.len(), CONTEXT - 1);
+        }
+        assert_eq!(calls, ARRIVAL_MARKERS.len());
+    }
+
     #[test]
     fn streaming_matches_offline_with_ragged_chunks_and_tail() {
         for len in [1, 479, 480, 481, 4807] {
@@ -455,16 +546,13 @@ mod tests {
             let out = stream.push(&[0.1; HOP], 1.0, &mut predict).unwrap();
             assert_eq!(out.len(), if hop < 6 { 0 } else { HOP });
             assert_eq!(stream.history.len(), TRANSFORM);
-            assert!(stream.frames.len() < CONTEXT);
+            assert!(stream.context.frames.len() < CONTEXT);
             assert!(stream.pending.len() < HOP);
         }
         let mut failed = StreamProcessor::new().unwrap();
         assert!(failed.push(&[f32::NAN], 1.0, &mut predict).is_err());
         assert_eq!(failed.samples(), 0);
         let mut bad = |_: &[f32]| Err(Error::new("Compute failed"));
-        for _ in 0..3 {
-            failed.push(&[0.0; HOP], 1.0, &mut bad).unwrap();
-        }
         assert!(failed.push(&[0.0; HOP], 1.0, &mut bad).is_err());
         assert!(failed.push(&[0.0; HOP], 1.0, &mut predict).is_err());
     }
@@ -541,7 +629,7 @@ mod tests {
         let mut seen = 0;
         p.process(&samples, 0.0, |ctx| {
             for j in 0..CONTEXT {
-                let idx = seen as i64 + j as i64 - 3;
+                let idx = seen as i64 + j as i64 - (CONTEXT - 1) as i64;
                 let expected = if idx >= 0 && (idx as usize) < Processor::frame_count(samples.len())
                 {
                     &features[idx as usize * FEATURES..(idx as usize + 1) * FEATURES]
@@ -554,7 +642,7 @@ mod tests {
             Ok(vec![0.0; GAINS])
         })
         .unwrap();
-        assert_eq!(seen, Processor::frame_count(samples.len()));
+        assert_eq!(seen, Processor::frame_count(samples.len()) + CONTEXT_RADIUS);
         assert!(features.iter().any(|v| *v > 0.0));
     }
 }

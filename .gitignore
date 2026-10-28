@@ -12,3 +12,7 @@
 /releases/*.deb
 __pycache__/
 *.pyc
+
+# Local VM media and release build staging.
+/work/
+/releases/*.zip

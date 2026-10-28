@@ -5,6 +5,12 @@ provides an offline waveform adapter. Equivalence to the vendor's audio output
 remains pending. CPU/AMD numerical agreement validates numerical consistency;
 speech preservation needs a separate quality reference.
 
+The supported feature graph is fully mapped and implemented. Its layer calls,
+stored tensor layouts, recurrent conventions, and connection evidence are
+documented in [MODEL_GRAPH.md](MODEL_GRAPH.md). The generated
+`model-graph.json` includes explicit source connections and all 32 stored tensor
+shapes. Completion of this feature graph is separate from waveform equivalence.
+
 ## Dimensions and execution order
 
 Input context: seven consecutive feature frames of 320 F32 values, oldest first.
@@ -53,7 +59,7 @@ The reset is applied to the recurrent candidate projection and its bias. Each
 layer preserves its own hidden vector. State commits only after the entire
 feature step succeeds. `reset()` clears all four vectors and the step counter.
 
-The gate convention follows the [cuDNN GRU linear-layer IDs](https://docs.nvidia.com/deeplearning/cudnn/archives/cudnn-896/api/index.html)
+The gate convention follows the [cuDNN GRU linear-layer IDs](https://docs.nvidia.com/deeplearning/cudnn/backend/v9.18.1/api/cudnn-adv-library.html)
 and the reset-after formulation described by [PyTorch's GRU documentation](https://docs.pytorch.org/docs/main/generated/torch.nn.GRU.html).
 
 ## Offline audio contract
@@ -89,10 +95,16 @@ scaling; earlier versions used direct linear blending at every frequency.
 
 Frame `t` starts at sample `480*t - 1440`. The offline sequence has
 `ceil(input_samples/480) + 3` spectral frames. Three future feature frames supply
-the network context; missing feature frames are zeros. First and final partial
+the network context; missing feature frames are zeros. The waveform adapter runs
+inference from the first arriving feature frame. Its first three predictions
+target virtual spectra before frame zero; their masks are discarded while their
+recurrent-state updates are retained. The first reconstructed frame therefore
+uses the fourth prediction. See [AUDIO_ALIGNMENT.md](AUDIO_ALIGNMENT.md). First and final partial
 waveform frames are zero-padded. The cropped output has exactly the input sample
 count. These explicit file boundaries give unity reconstruction at both ends;
-vendor startup state, flush policy, and complete audio-output parity remain open.
+complete startup/flush agreement and audio-output parity remain open. The
+reference input-level conditioner is still absent; directly boosting input level
+was not a reliable quality improvement in the exploratory comparison.
 
 ## GPU and stream execution
 

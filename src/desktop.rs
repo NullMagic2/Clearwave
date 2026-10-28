@@ -1,7 +1,10 @@
 //! Native desktop controls. Opening the window never starts audio capture.
 use crate::{
     Error, Result,
-    controls::{Preferences, StrengthControl},
+    controls::{
+        DESKTOP_EVENT_CAPACITY, DesktopOptions, MAX_CHILD_EVENT_BYTES, MAX_LATENCY_MS,
+        METER_STALE_AFTER, MIN_LATENCY_MS, Preferences, StrengthControl, UI_REFRESH_INTERVAL,
+    },
     gpu::AdapterInfo,
     i18n::{Language, Text},
     pipewire::Node,
@@ -19,6 +22,14 @@ use std::{
     time::{Duration, Instant},
 };
 
+const SETTINGS_SAVE_DELAY: Duration = Duration::from_millis(400);
+const CHILD_STOP_TIMEOUT: Duration = Duration::from_secs(2);
+const CHILD_POLL_INTERVAL: Duration = Duration::from_millis(10);
+const PERCENT_SCALE: f32 = 100.0;
+const METER_RANGE_DB: f32 = 60.0;
+const MIN_METER_AMPLITUDE: f32 = 1e-6;
+const SIGNAL_AMPLITUDE_THRESHOLD: f32 = 1e-5;
+
 enum Event {
     Sources(Result<Vec<Node>>),
     Adapters(Vec<AdapterInfo>),
@@ -26,7 +37,7 @@ enum Event {
     Log(u32, String),
 }
 struct Live {
-    child: Child,
+    child: Option<Child>,
     control: PathBuf,
     stopping: bool,
     route_ready: bool,
@@ -35,9 +46,11 @@ struct Live {
 impl Live {
     fn stop(&mut self) {
         self.stopping = true;
-        if matches!(self.child.try_wait(), Ok(None)) {
+        if let Some(child) = &mut self.child
+            && matches!(child.try_wait(), Ok(None))
+        {
             let _ = nix::sys::signal::kill(
-                nix::unistd::Pid::from_raw(self.child.id() as i32),
+                nix::unistd::Pid::from_raw(child.id() as i32),
                 nix::sys::signal::Signal::SIGTERM,
             );
         }
@@ -46,24 +59,28 @@ impl Live {
 impl Drop for Live {
     fn drop(&mut self) {
         self.stop();
-        let deadline = Instant::now() + Duration::from_secs(2);
-        loop {
-            match self.child.try_wait() {
-                Ok(Some(_)) => break,
-                Err(_) => break,
-                Ok(None) if Instant::now() < deadline => {
-                    std::thread::sleep(Duration::from_millis(10))
+        if let Some(mut child) = self.child.take() {
+            std::thread::spawn(move || {
+                let deadline = Instant::now() + CHILD_STOP_TIMEOUT;
+                loop {
+                    match child.try_wait() {
+                        Ok(Some(_)) | Err(_) => break,
+                        Ok(None) if Instant::now() < deadline => {
+                            std::thread::sleep(CHILD_POLL_INTERVAL);
+                        }
+                        _ => {
+                            let _ = child.kill();
+                            let _ = child.wait();
+                            break;
+                        }
+                    }
                 }
-                _ => {
-                    let _ = self.child.kill();
-                    let _ = self.child.wait();
-                    break;
-                }
-            }
+            });
         }
         let _ = std::fs::remove_file(&self.control);
     }
 }
+
 #[derive(Default)]
 struct Meter {
     rms: f32,
@@ -75,7 +92,7 @@ fn read_child(id: u32, input: impl std::io::Read + Send + 'static, sender: SyncS
             let Ok(line) = line else {
                 break;
             };
-            if line.len() > 16384 {
+            if line.len() > MAX_CHILD_EVENT_BYTES {
                 continue;
             }
             let event = match serde_json::from_str(&line) {
@@ -90,28 +107,8 @@ fn read_child(id: u32, input: impl std::io::Read + Send + 'static, sender: SyncS
 }
 
 pub fn launch(args: &[PathBuf]) -> Result<()> {
-    let mut settings = crate::controls::runtime_directory()?.join("desktop.json");
-    let mut bundle = None;
-    let mut i = 0;
-    while i < args.len() {
-        if args[i].as_os_str() == "--settings" {
-            i += 1;
-            settings = args
-                .get(i)
-                .ok_or_else(|| Error::new("--settings requires a file path"))?
-                .clone();
-        } else if bundle.is_none() {
-            bundle = Some(args[i].clone());
-        } else {
-            return Err(Error::new(
-                "Usage: gui [BUNDLE_DIRECTORY] [--settings PREFERENCES.json]",
-            ));
-        }
-        i += 1;
-    }
-    if settings.is_relative() {
-        settings = std::env::current_dir()?.join(settings);
-    }
+    let DesktopOptions { settings, bundle } = DesktopOptions::parse(args)?;
+
     gtk::init().map_err(|e| Error::new(format!("Cannot open GTK3: {e}")))?;
     let app = Rc::new(RefCell::new(Desktop::new(settings, bundle)));
     let ui = Interface::new()?;
@@ -121,7 +118,7 @@ pub fn launch(args: &[PathBuf]) -> Result<()> {
     ui.message.hide();
     let weak = Rc::downgrade(&app);
     let view = ui.clone();
-    let timer = glib::timeout_add_local(Duration::from_millis(100), move || {
+    let timer = glib::timeout_add_local(UI_REFRESH_INTERVAL, move || {
         let Some(app) = weak.upgrade() else {
             return glib::ControlFlow::Break;
         };
@@ -130,7 +127,7 @@ pub fn launch(args: &[PathBuf]) -> Result<()> {
             state.events();
             if state
                 .dirty
-                .is_some_and(|at| at.elapsed() > Duration::from_millis(400))
+                .is_some_and(|at| at.elapsed() > SETTINGS_SAVE_DELAY)
             {
                 state.save(false);
             }
@@ -188,7 +185,7 @@ impl Desktop {
                 )),
             ),
         };
-        let (sender, events) = mpsc::sync_channel(128);
+        let (sender, events) = mpsc::sync_channel(DESKTOP_EVENT_CAPACITY);
         let mut app = Self {
             preferences,
             settings_path,
@@ -267,7 +264,6 @@ impl Desktop {
                 self.preferences.language.text(Text::ChooseBundle),
             ));
         }
-        // All model discovery, file reads, and graph validation run in the live child.
         let bundle = PathBuf::from(&p.bundle);
         let bundle = if bundle.is_absolute() {
             bundle
@@ -318,7 +314,7 @@ impl Desktop {
             read_child(id, output, self.sender.clone());
         }
         self.live = Some(Live {
-            child,
+            child: Some(child),
             control,
             stopping: false,
             route_ready: false,
@@ -334,6 +330,7 @@ impl Desktop {
     fn events(&mut self) {
         if let Some(result) = self.picker.as_ref().and_then(|picker| picker.poll()) {
             self.picker.take();
+            self.message = None;
             match result {
                 Ok(Some(path)) => {
                     self.preferences.active.bundle = path.to_string_lossy().into_owned();
@@ -379,13 +376,19 @@ impl Desktop {
                         .collect();
                     self.revision += 1;
                 }
-                Event::Log(id, text) if self.live.as_ref().is_some_and(|l| l.child.id() == id) => {
+                Event::Log(id, text)
+                    if self.live.as_ref().is_some_and(|l| {
+                        l.child.as_ref().is_some_and(|child| child.id() == id)
+                    }) =>
+                {
                     if !text.trim().is_empty() {
                         self.message = Some((true, text));
                     }
                 }
                 Event::Child(id, value)
-                    if self.live.as_ref().is_some_and(|l| l.child.id() == id) =>
+                    if self.live.as_ref().is_some_and(|l| {
+                        l.child.as_ref().is_some_and(|child| child.id() == id)
+                    }) =>
                 {
                     match value["event"].as_str().unwrap_or("") {
                         "live_started" => {
@@ -427,11 +430,14 @@ impl Desktop {
                 _ => {}
             }
         }
-        let ended = self.live.as_mut().and_then(|l| match l.child.try_wait() {
-            Ok(Some(status)) => Some((status.success(), l.stopping)),
-            Err(_) => Some((false, l.stopping)),
-            _ => None,
-        });
+        let ended = self
+            .live
+            .as_mut()
+            .and_then(|l| match l.child.as_mut()?.try_wait() {
+                Ok(Some(status)) => Some((status.success(), l.stopping)),
+                Err(_) => Some((false, l.stopping)),
+                _ => None,
+            });
         if let Some((success, stopping)) = ended {
             self.live.take();
             self.last_levels = None;
@@ -449,8 +455,9 @@ impl Desktop {
     }
 }
 
-/// GTK widgets live exclusively on the main thread. Audio and device discovery
-/// send plain data through the bounded event queue.
+/// GTK widgets live exclusively on the main thread.
+/// Audio processing and device discovery own their worker resources.
+/// Bounded messages transfer plain data without sharing GTK objects.
 #[derive(Clone)]
 struct Interface {
     window: gtk::Window,
@@ -477,6 +484,7 @@ struct Interface {
     configuration: gtk::Box,
     bundle: gtk::Entry,
     browse: gtk::Button,
+    installer: gtk::Button,
     adapter: gtk::ComboBoxText,
     latency: gtk::SpinButton,
     save: gtk::Button,
@@ -509,18 +517,21 @@ impl Interface {
             labels.push((widget.clone(), key));
             widget
         };
+
         let window = gtk::Window::new(gtk::WindowType::Toplevel);
-        window.set_title("Clearwave");
+        window.set_title(Language::default().text(Text::Title));
         window.set_default_size(560, 530);
         window.set_position(gtk::WindowPosition::Center);
+
         let header = gtk::HeaderBar::new();
-        header.set_title(Some("Clearwave"));
-        header.set_subtitle(Some("Stopped"));
+        header.set_title(Some(Language::default().text(Text::Title)));
+        header.set_subtitle(Some(Language::default().text(Text::Stopped)));
         header.set_show_close_button(true);
         let settings_button =
             gtk::Button::from_icon_name(Some("emblem-system-symbolic"), gtk::IconSize::Button);
-        settings_button.set_tooltip_text(Some("Settings"));
+        settings_button.set_tooltip_text(Some(Language::default().text(Text::Settings)));
         header.pack_end(&settings_button);
+
         let language_button = gtk::MenuButton::new();
         let language_image = gtk::Image::new();
         language_button.add(&language_image);
@@ -556,6 +567,7 @@ impl Interface {
         let content = vertical(22);
         margins(&content, 24);
         window.add(&content);
+
         let input = vertical(8);
         input.add(&translated(Text::Microphone));
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
@@ -565,10 +577,10 @@ impl Interface {
             cell.set_property("ellipsize", gtk::pango::EllipsizeMode::End);
             cell.set_property("max-width-chars", 44i32);
         }
-        source.set_tooltip_text(Some("Select the microphone to process"));
+        source.set_tooltip_text(Some(Language::default().text(Text::SourceTip)));
         let refresh =
             gtk::Button::from_icon_name(Some("view-refresh-symbolic"), gtk::IconSize::Button);
-        refresh.set_tooltip_text(Some("Refresh microphones and graphics devices"));
+        refresh.set_tooltip_text(Some(Language::default().text(Text::RefreshTip)));
         row.pack_start(&source, true, true, 0);
         row.pack_start(&refresh, false, false, 0);
         input.add(&row);
@@ -580,12 +592,15 @@ impl Interface {
         let percent = label("100%");
         row.pack_end(&percent, false, false, 0);
         removal.add(&row);
-        let strength = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 100.0, 1.0);
+        let strength = gtk::Scale::with_range(
+            gtk::Orientation::Horizontal,
+            0.0,
+            f64::from(PERCENT_SCALE),
+            1.0,
+        );
         strength.set_draw_value(false);
-        strength.set_value(100.0);
-        strength.set_tooltip_text(Some(
-            "0% bypasses removal; 100% applies the full predicted noise mask",
-        ));
+        strength.set_value(f64::from(PERCENT_SCALE));
+        strength.set_tooltip_text(Some(Language::default().text(Text::StrengthTip)));
         removal.add(&strength);
         content.add(&removal);
 
@@ -595,7 +610,7 @@ impl Interface {
         bar.set_hexpand(true);
         bar.set_value(0.0);
         signal.add(&bar);
-        let value = label("No signal");
+        let value = label(Language::default().text(Text::NoSignal));
         value.style_context().add_class("dim-label");
         signal.add(&value);
         let meter = (bar, value);
@@ -606,20 +621,18 @@ impl Interface {
         let heading = translated(Text::VirtualMicrophone);
         heading.style_context().add_class("dim-label");
         destination.add(&heading);
-        let output = label("Select a microphone above");
+        let output = label(Language::default().text(Text::ChooseMicrophone));
         output.set_line_wrap(true);
         output.set_max_width_chars(54);
         output.set_selectable(true);
         destination.add(&output);
-        let use_default = gtk::Button::with_label("Use as system microphone");
+        let use_default = gtk::Button::with_label(Language::default().text(Text::Default));
         use_default.set_halign(gtk::Align::Start);
-        use_default.set_tooltip_text(Some(
-            "Apps using a fixed input must select the virtual microphone in their own settings",
-        ));
+        use_default.set_tooltip_text(Some(Language::default().text(Text::DefaultTip)));
         destination.add(&use_default);
         content.add(&destination);
 
-        let start = gtk::Button::with_label("Start");
+        let start = gtk::Button::with_label(Language::default().text(Text::Start));
         start.style_context().add_class("suggested-action");
         start.set_height_request(42);
         content.add(&start);
@@ -630,10 +643,13 @@ impl Interface {
         content.add(&message);
 
         let settings = gtk::Dialog::with_buttons(
-            Some("Settings"),
+            Some(Language::default().text(Text::Settings)),
             Some(&window),
             gtk::DialogFlags::DESTROY_WITH_PARENT,
-            &[("Close", gtk::ResponseType::Close)],
+            &[(
+                Language::default().text(Text::Close),
+                gtk::ResponseType::Close,
+            )],
         );
         settings.set_default_size(580, 310);
         settings.set_resizable(false);
@@ -645,13 +661,16 @@ impl Interface {
         let panel = vertical(18);
         margins(&panel, 20);
         settings.content_area().add(&panel);
+
         let configuration = vertical(8);
         configuration.add(&translated(Text::ModelFolder));
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         let bundle = gtk::Entry::new();
         bundle.set_hexpand(true);
-        let browse = gtk::Button::with_label("Browse…");
+        let browse = gtk::Button::with_label(Language::default().text(Text::Browse));
+        let installer = gtk::Button::with_label(Language::default().text(Text::Installer));
         row.pack_start(&bundle, true, true, 0);
+        row.pack_end(&installer, false, false, 0);
         row.pack_end(&browse, false, false, 0);
         configuration.add(&row);
         configuration.add(&translated(Text::Device));
@@ -659,7 +678,8 @@ impl Interface {
         configuration.add(&adapter);
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
         row.pack_start(&translated(Text::Buffer), true, true, 0);
-        let latency = gtk::SpinButton::with_range(5.0, 100.0, 1.0);
+        let latency =
+            gtk::SpinButton::with_range(f64::from(MIN_LATENCY_MS), f64::from(MAX_LATENCY_MS), 1.0);
         row.pack_end(&latency, false, false, 0);
         configuration.add(&row);
         panel.add(&configuration);
@@ -668,9 +688,11 @@ impl Interface {
         note.set_max_width_chars(54);
         note.style_context().add_class("dim-label");
         panel.add(&note);
-        let save = gtk::Button::with_label("Save settings");
+
+        let save = gtk::Button::with_label(Language::default().text(Text::Save));
         save.set_halign(gtk::Align::Start);
         panel.add(&save);
+
         let settings_message = label("");
         settings_message.set_line_wrap(true);
         settings_message.set_max_width_chars(54);
@@ -682,6 +704,7 @@ impl Interface {
         let mut buttons = vec![
             (use_default.clone(), Text::Default),
             (browse.clone(), Text::Browse),
+            (installer.clone(), Text::Installer),
             (save.clone(), Text::Save),
         ];
         if let Some(close) = settings
@@ -715,6 +738,7 @@ impl Interface {
             configuration,
             bundle,
             browse,
+            installer,
             adapter,
             latency,
             save,
@@ -782,7 +806,7 @@ impl Interface {
         self.latency
             .set_value(state.preferences.active.latency_ms.into());
         self.strength
-            .set_value(f64::from(state.preferences.active.strength) * 100.0);
+            .set_value(f64::from(state.preferences.active.strength) * f64::from(PERCENT_SCALE));
         self.updating.set(false);
     }
 
@@ -817,6 +841,7 @@ impl Interface {
             } else {
                 Text::Browse
             }));
+        self.installer.set_sensitive(state.picker.is_none());
         self.bundle.set_editable(state.picker.is_none());
         self.source.set_sensitive(live.is_none());
         self.refresh.set_sensitive(live.is_none());
@@ -824,7 +849,7 @@ impl Interface {
         self.use_default.set_sensitive(ready);
         self.percent.set_text(&format!(
             "{:.0}%",
-            state.preferences.active.strength * 100.0
+            state.preferences.active.strength * PERCENT_SCALE
         ));
         let output = if live.is_some() && !state.output_name.is_empty() {
             state.output_name.clone()
@@ -839,19 +864,21 @@ impl Interface {
         self.output.set_text(&output);
         let fresh = state
             .last_levels
-            .is_some_and(|at| at.elapsed() < Duration::from_millis(600));
+            .is_some_and(|at| at.elapsed() < METER_STALE_AFTER);
         {
             let (bar, text) = &self.meter;
             let meter = &state.output;
             let rms = if fresh { meter.rms } else { 0.0 };
-            let db = 20.0 * rms.max(1e-6).log10();
-            bar.set_value(f64::from(((db + 60.0) / 60.0).clamp(0.0, 1.0)));
-            text.set_text(&if rms > 1e-5 {
+            let db = 20.0 * rms.max(MIN_METER_AMPLITUDE).log10();
+            bar.set_value(f64::from(
+                ((db + METER_RANGE_DB) / METER_RANGE_DB).clamp(0.0, 1.0),
+            ));
+            text.set_text(&if rms > SIGNAL_AMPLITUDE_THRESHOLD {
                 format!("{db:.1} dBFS")
             } else {
                 language.text(Text::NoSignal).into()
             });
-            bar.set_tooltip_text(Some(&if fresh && meter.peak > 1e-5 {
+            bar.set_tooltip_text(Some(&if fresh && meter.peak > SIGNAL_AMPLITUDE_THRESHOLD {
                 format!(
                     "{} {:.1} dBFS",
                     language.text(Text::Peak),
@@ -959,7 +986,8 @@ impl Interface {
             }
             if let Some(state) = weak.upgrade() {
                 let mut state = state.borrow_mut();
-                state.preferences.active.strength = (scale.value() / 100.0) as f32;
+                state.preferences.active.strength =
+                    (scale.value() / f64::from(PERCENT_SCALE)) as f32;
                 if let Some(live) = &state.live
                     && let Err(e) =
                         StrengthControl::write(&live.control, state.preferences.active.strength)
@@ -981,34 +1009,42 @@ impl Interface {
                 state.changed();
             }
         });
-        let weak = Rc::downgrade(state);
-        self.browse.connect_clicked(move |_| {
-            let Some(state) = weak.upgrade() else {
-                return;
-            };
-            let mut state = state.borrow_mut();
-            if state.picker.take().is_some() {
-                return;
-            }
-            match crate::folder_picker::FolderPicker::start(
-                PathBuf::from(&state.preferences.active.bundle),
-                state.preferences.language,
-            ) {
-                Ok(picker) => {
-                    state.picker = Some(picker);
-                    state.message = None;
+        for (button, installer) in [(&self.browse, false), (&self.installer, true)] {
+            let weak = Rc::downgrade(state);
+            button.connect_clicked(move |_| {
+                let Some(state) = weak.upgrade() else {
+                    return;
+                };
+                let mut state = state.borrow_mut();
+                if state.picker.take().is_some() {
+                    return;
                 }
-                Err(error) => {
-                    state.message = Some((
-                        true,
-                        format!(
-                            "{}: {error}",
-                            state.preferences.language.text(Text::PickerError)
-                        ),
-                    ))
+                match crate::folder_picker::FolderPicker::start(
+                    PathBuf::from(&state.preferences.active.bundle),
+                    state.preferences.language,
+                    installer,
+                ) {
+                    Ok(picker) => {
+                        state.picker = Some(picker);
+                        state.message = installer.then(|| {
+                            (
+                                false,
+                                state.preferences.language.text(Text::SelectingModel).into(),
+                            )
+                        });
+                    }
+                    Err(error) => {
+                        state.message = Some((
+                            true,
+                            format!(
+                                "{}: {error}",
+                                state.preferences.language.text(Text::PickerError)
+                            ),
+                        ))
+                    }
                 }
-            }
-        });
+            });
+        }
         let weak = Rc::downgrade(state);
         self.settings.connect_hide(move |_| {
             if let Some(state) = weak.upgrade() {
@@ -1050,5 +1086,41 @@ impl Interface {
                 state.borrow_mut().save(true);
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn closing_live_processing_never_waits_for_a_stuck_child_on_the_ui_thread() {
+        let mut child = Command::new("sh")
+            .args(["-c", "trap '' TERM; printf 'ready\n'; exec sleep 30"])
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let pid = nix::unistd::Pid::from_raw(child.id() as i32);
+        let mut ready = String::new();
+        BufReader::new(child.stdout.take().unwrap())
+            .read_line(&mut ready)
+            .unwrap();
+        assert_eq!(ready, "ready\n");
+
+        let live = Live {
+            child: Some(child),
+            control: PathBuf::new(),
+            stopping: false,
+            route_ready: false,
+            compute_ready: false,
+        };
+        let before = Instant::now();
+        drop(live);
+        assert!(before.elapsed() < Duration::from_millis(200));
+
+        let deadline = Instant::now() + Duration::from_secs(4);
+        while nix::sys::signal::kill(pid, None) != Err(nix::errno::Errno::ESRCH) {
+            assert!(Instant::now() < deadline, "Owned child was not reaped");
+            std::thread::sleep(Duration::from_millis(20));
+        }
     }
 }

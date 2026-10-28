@@ -1,26 +1,36 @@
 //! Bounded PE section access for the supported runtime package.
 use crate::{Error, Result};
 
+const DOS_PE_POINTER: usize = 0x3c;
+const COFF_SECTION_COUNT: usize = 6;
+const COFF_OPTIONAL_SIZE: usize = 20;
+const PE_HEADER_BYTES: usize = 24;
+const SECTION_HEADER_BYTES: usize = 40;
+const SECTION_VIRTUAL_ADDRESS: usize = 12;
+const SECTION_RAW_SIZE: usize = 16;
+const SECTION_RAW_POINTER: usize = 20;
+const MAX_SECTIONS: usize = 96;
+
 pub fn slice_at_rva(bytes: &[u8], rva: u32, len: usize) -> Result<&[u8]> {
     if bytes.get(..2) != Some(b"MZ") {
         return Err(Error::new("Runtime is not a PE file"));
     }
-    let pe = read_u32(bytes, 0x3c)? as usize;
+    let pe = read_u32(bytes, DOS_PE_POINTER)? as usize;
     if bytes.get(pe..pe + 4) != Some(b"PE\0\0") {
         return Err(Error::new("Invalid PE signature"));
     }
-    let count = read_u16(bytes, pe + 6)? as usize;
-    let opt = read_u16(bytes, pe + 20)? as usize;
-    if count > 96 {
+    let count = read_u16(bytes, pe + COFF_SECTION_COUNT)? as usize;
+    let opt = read_u16(bytes, pe + COFF_OPTIONAL_SIZE)? as usize;
+    if count > MAX_SECTIONS {
         return Err(Error::new("Unreasonable PE section count"));
     }
     for i in 0..count {
         let offset = pe
-            .checked_add(24 + opt + i * 40)
+            .checked_add(PE_HEADER_BYTES + opt + i * SECTION_HEADER_BYTES)
             .ok_or_else(|| Error::new("PE offset overflow"))?;
-        let start = read_u32(bytes, offset + 12)?;
-        let size = read_u32(bytes, offset + 16)? as usize;
-        let raw = read_u32(bytes, offset + 20)? as usize;
+        let start = read_u32(bytes, offset + SECTION_VIRTUAL_ADDRESS)?;
+        let size = read_u32(bytes, offset + SECTION_RAW_SIZE)? as usize;
+        let raw = read_u32(bytes, offset + SECTION_RAW_POINTER)? as usize;
         if let Some(delta) = rva.checked_sub(start) {
             let delta = delta as usize;
             if delta.checked_add(len).is_some_and(|end| end <= size) {

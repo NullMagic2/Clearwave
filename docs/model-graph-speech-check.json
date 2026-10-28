@@ -1,0 +1,40 @@
+{
+  "scope": "Public clean speech and known noisy-mixture regression after completing the feature graph mapping; compares full-strength AMD waveform output with the existing 0.6.6 public-reference output. No private recordings.",
+  "adapter_selector": "7900",
+  "cases": {
+    "0-clean": {
+      "input_sha256": "ba4af11e6af8142b035a6a423b114da0ecff2af43e9043cbc41a1b168e03ef64",
+      "reference_sha256": "819f2230501794202a5b0fb34d50880b186889ccb7eb4e4456e7e697e4189396",
+      "candidate_sha256": "819f2230501794202a5b0fb34d50880b186889ccb7eb4e4456e7e697e4189396",
+      "samples": 808320,
+      "max_absolute_error": 0.0,
+      "passed": true
+    },
+    "0-snr10-click-hum-static": {
+      "input_sha256": "88f66d99d5ca4b94fbbad017f163836a73860b1aeede55d3445cda19bd207c1f",
+      "reference_sha256": "b22bce47542b363b98db0453e48191bed463dc37f1191c857b550127aacc1dae",
+      "candidate_sha256": "b22bce47542b363b98db0453e48191bed463dc37f1191c857b550127aacc1dae",
+      "samples": 808320,
+      "max_absolute_error": 0.0,
+      "passed": true
+    },
+    "1-clean": {
+      "input_sha256": "54cf23c2c9aa5746306e0e940e4baa79872ee3e285f196a90b19c53f3fd1a254",
+      "reference_sha256": "716871a1dd2ce3645e6ce87e5237a6303d510a100c00a87cee501e3cfc1c1137",
+      "candidate_sha256": "716871a1dd2ce3645e6ce87e5237a6303d510a100c00a87cee501e3cfc1c1137",
+      "samples": 763683,
+      "max_absolute_error": 0.0,
+      "passed": true
+    },
+    "1-snr10-click-hum-static": {
+      "input_sha256": "f07a78a3ea686bc3eebad3be9261e2bc2c99b6659bbe82112962e9f6ba7a15de",
+      "reference_sha256": "d30d70b200a998aebe5b99cb529791ddfcb6ef4efd0fdc4c7b6b614a06cb7420",
+      "candidate_sha256": "d30d70b200a998aebe5b99cb529791ddfcb6ef4efd0fdc4c7b6b614a06cb7420",
+      "samples": 763683,
+      "max_absolute_error": 0.0,
+      "passed": true
+    }
+  },
+  "passed": true,
+  "reference_report": "natural-speech-check.json"
+}

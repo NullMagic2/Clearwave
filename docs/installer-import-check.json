@@ -1,0 +1,13 @@
+{
+  "version": "0.7.0",
+  "real_installer_import_passed": true,
+  "supported_version": "0.5.12.6",
+  "cached_weights_bytes": 62456484,
+  "same_installer_reuses_cache": true,
+  "failed_import_published": false,
+  "failed_import_staging_cleaned": true,
+  "graph_validated": true,
+  "installer_executed": false,
+  "vendor_assets_distributed": false,
+  "elapsed_seconds": 4.85
+}

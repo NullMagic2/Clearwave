@@ -1,83 +1,68 @@
 {
   "application": "Clearwave",
-  "version": "0.6.6",
-  "architecture": "amd64",
-  "maximum_glibc_symbol": "2.39",
-  "binary_sha256": "5f2e5bddeebcb3b8b4aabf681071c570031692dd7484f76455265211afee6df8",
+  "version": "0.7.0",
   "application_license": "MIT",
-  "rust_unit_tests": {
-    "passed": 32,
+  "linux_unit_tests": {
+    "passed": 42,
     "failed": 0
   },
-  "interface_validation": "docs/simple-ui-check.json",
-  "folder_picker_validation": "docs/folder-picker-check.json",
-  "prior_0_6_5_installed_gui_checks": {
-    "ubuntu24.04": {
-      "native_window": true,
-      "installed_path": "/usr/bin/true (isolated test mount of packaged ELF)",
-      "legacy_preferences_preserved": true,
-      "per_user_settings_saved": true,
-      "exit_status": 0,
-      "stderr": "",
-      "settings_location": "XDG_DATA_HOME/clearwave/runtime/desktop.json"
-    },
-    "debian13": {
-      "native_window": true,
-      "installed_path": "/usr/bin/true (isolated test mount of packaged ELF)",
-      "legacy_preferences_preserved": true,
-      "per_user_settings_saved": true,
-      "exit_status": 0,
-      "stderr": "",
-      "settings_location": "XDG_DATA_HOME/clearwave/runtime/desktop.json"
-    },
-    "default_metadata_unchanged": true
+  "windows_wine_tests": {
+    "passed": 39,
+    "failed": 0,
+    "ignored_opt_in_preview": 1
   },
-  "packages": {
-    "clearwave_0.6.6-1+debian13_amd64.deb": {
-      "sha256_verified": true,
-      "same_compatible_executable": true,
-      "nvidia_files_absent": true,
-      "style_guide_absent": true,
-      "application_mit_license_included": true,
-      "root_archive_ownership": true,
-      "rust_dependency_notices": 140
-    },
-    "clearwave_0.6.6-1+mint22_amd64.deb": {
-      "sha256_verified": true,
-      "same_compatible_executable": true,
-      "nvidia_files_absent": true,
-      "style_guide_absent": true,
-      "application_mit_license_included": true,
-      "root_archive_ownership": true,
-      "rust_dependency_notices": 140
-    },
-    "clearwave_0.6.6-1+ubuntu24.04_amd64.deb": {
-      "sha256_verified": true,
-      "same_compatible_executable": true,
-      "nvidia_files_absent": true,
-      "style_guide_absent": true,
-      "application_mit_license_included": true,
-      "root_archive_ownership": true,
-      "rust_dependency_notices": 140
-    }
-  },
-  "full_distribution_installations_tested": false,
-  "mint_native_vm_tested": false,
-  "audio_quality_fix_in_this_release": "Output projection layout and conditional lower-intensity mask scaling; residual muffling/static unresolved",
-  "physical_audio_quality_verified": false,
-  "controlled_speech_validation": [
-    "docs/projection-quality-check.json",
-    "docs/natural-speech-check.json"
-  ],
-  "stream_validation": "docs/corrected-stream-check.json",
-  "prior_model_loader_validation": "docs/model-source-check.json",
-  "prior_synthetic_gui_audio_validation": "docs/dll-free-gui-check.json",
-  "live_routing_validation": "docs/live-routing-0.6.6.json",
   "rust_lint": {
-    "toolchain": "1.93.1",
-    "all_targets": true,
+    "linux_and_windows_all_targets": true,
     "warnings_denied": true,
     "passed": true
   },
-  "rust_format_check_passed": true
+  "rust_format_check_passed": true,
+  "maximum_glibc_symbol": "2.39",
+  "linux_binary_sha256": "76e69390631c8b06de2ef231f69d44e96c3e51ffa36ecc9137daa6a958e13e49",
+  "windows_binary_sha256": "8ee5a95ad508ca328848f7ec4498c272699d82851a1068888b6f19aaac9addc9",
+  "packages": {
+    "clearwave_0.7.0-1+debian13_amd64.deb": {
+      "sha256_verified": true,
+      "same_compatible_executable": true,
+      "root_archive_ownership": true,
+      "style_guide_absent": true,
+      "nvidia_files_absent": true,
+      "rust_dependency_notices": 140
+    },
+    "clearwave_0.7.0-1+ubuntu24.04_amd64.deb": {
+      "sha256_verified": true,
+      "same_compatible_executable": true,
+      "root_archive_ownership": true,
+      "style_guide_absent": true,
+      "nvidia_files_absent": true,
+      "rust_dependency_notices": 140
+    },
+    "clearwave_0.7.0-1+mint22_amd64.deb": {
+      "sha256_verified": true,
+      "same_compatible_executable": true,
+      "root_archive_ownership": true,
+      "style_guide_absent": true,
+      "nvidia_files_absent": true,
+      "rust_dependency_notices": 140
+    }
+  },
+  "windows_package": {
+    "version": "0.7.0",
+    "architecture": "x86_64",
+    "target": "x86_64-pc-windows-gnu",
+    "filename": "clearwave-0.7.0-windows-x86_64.zip",
+    "sha256": "e6795b51689b3483e3d50f460badb144248aefc59d9529d0950d4adccf7f2bbc",
+    "binary_sha256": "8ee5a95ad508ca328848f7ec4498c272699d82851a1068888b6f19aaac9addc9",
+    "rust_dependency_notices": 110,
+    "nvidia_assets_included": false,
+    "style_guide_included": false
+  },
+  "installer_import_validation": "docs/installer-import-check.json",
+  "windows_native_vm_interface_checked": true,
+  "physical_windows_audio_verified": false,
+  "full_distribution_installations_tested": false,
+  "vendor_waveform_parity_established": false,
+  "speech_quality_established": false,
+  "model_graph_validation": "docs/model-graph-check.json",
+  "stream_validation": "docs/startup-stream-check.json"
 }

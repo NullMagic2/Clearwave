@@ -1,6 +1,9 @@
 //! Mixed-radix complex FFT with reusable twiddles and bounded workspace.
 use crate::{Error, Result};
 
+const MAX_TRANSFORM_LENGTH: usize = 65536;
+const RADIX_FACTORS: [usize; 3] = [2, 3, 5];
+
 #[derive(Clone, Copy, Default)]
 pub struct Complex {
     pub re: f32,
@@ -24,12 +27,12 @@ pub struct Fft {
 impl Fft {
     pub fn new(len: usize) -> Result<Self> {
         let mut remaining = len;
-        for factor in [2, 3, 5] {
+        for factor in RADIX_FACTORS {
             while remaining > 1 && remaining.is_multiple_of(factor) {
                 remaining /= factor;
             }
         }
-        if remaining != 1 || len == 0 || len > 65536 {
+        if remaining != 1 || len == 0 || len > MAX_TRANSFORM_LENGTH {
             return Err(Error::new(
                 "FFT length must use factors 2, 3, 5 and be at most 65536",
             ));

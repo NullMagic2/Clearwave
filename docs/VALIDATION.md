@@ -230,3 +230,44 @@ captures 192,000 finite, nonzero output samples. SIGTERM removes the owned
 virtual nodes; parsed default-device metadata is unchanged after cleanup.
 See `live-routing-0.6.6.json`. This exercises the final executable's routing,
 not a new physical microphone recording or a native GUI quality evaluation.
+
+
+## Waveform startup and speech-detail investigation
+
+The 0.7.0 development adapter now retains three initial recurrent-state updates
+that earlier waveform builds skipped. Offline and live paths share one bounded
+frame-context implementation. All 39 Linux tests pass, including priming and
+unchanged 60 ms algorithmic delay. The corrected AMD raw stream and offline
+output agree sample-for-sample across 336,000 samples.
+
+Quiet-speech measurements now include 80–1,000 Hz, 1–4 kHz, and 4–8 kHz voice
+projection and SI-SDR, along with adjustable input RMS, clip duration, and lead-in.
+A fixed pre-inference level boost with reciprocal output scaling is available
+only in the benchmark tool. It was not adopted in application processing because
+the sampled effects were mixed and clean-speech distortion increased.
+
+See `AUDIO_ALIGNMENT.md`, `startup-speech-check.json`,
+`startup-stream-check.json`, and `input-level-study.json`. The complete reference
+stateful input conditioner, subjective voice quality, and NVIDIA waveform
+equivalence remain unresolved. Implementation estimates remain separate from
+these measurements. No microphone recording was made during these checks.
+
+## Native Windows and local installer import — 0.7.0 experimental
+
+The release source passes all-target Clippy with warnings denied for Linux and
+Windows, formatting, 42 Linux tests, and 39 Windows-target tests under Wine. The
+Windows VM inspection confirmed native system colors and all five language
+choices; the duplicate application heading was removed from the content area.
+Windows physical capture/playback remains unverified.
+
+The installer importer was checked with the locally supplied RTX Voice 0.5.12.6
+setup archive. It produced a graph-validated exported model, reused the same
+cache without rewriting its weights, and rejected an invalid installer without
+publishing a cache or leaving staging files. See `installer-import-check.json`.
+The Windows importer cross-compiles and shares this pipeline; interactive native
+Windows extraction with an installed 7-Zip remains a separate validation boundary.
+
+`releases/validation.json` records final package checks: matching executable
+hashes, Linux archive ownership, dependency notices, and exclusion of NVIDIA
+assets and the style guide. The source archive uses Git export attributes to
+exclude the style guide. No private recording or imported model is published.

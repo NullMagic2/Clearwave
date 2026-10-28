@@ -1,24 +1,31 @@
 //! Bounded RIFF/WAVE input and float32 mono output.
-use crate::{Error, Result};
-use std::{
-    fs::{File, OpenOptions},
-    io::{Read, Write},
-    path::Path,
+use crate::{
+    Error, Result,
+    audio::{MAX_SAMPLE_AMPLITUDE, RATE},
+    storage::bounded_read,
 };
+use std::{fs::OpenOptions, io::Write, path::Path};
 
-const MAX_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_BYTES: usize = 64 * 1024 * 1024;
+const RIFF_HEADER_BYTES: usize = 12;
+const RIFF_SIZE_PREFIX_BYTES: usize = 8;
+const CHUNK_HEADER_BYTES: usize = 8;
+const FORMAT_BYTES: usize = 16;
+const PCM_FORMAT: u16 = 1;
+const IEEE_FLOAT_FORMAT: u16 = 3;
+const OUTPUT_CHANNELS: u16 = 1;
+const FLOAT_SAMPLE_BYTES: u16 = std::mem::size_of::<f32>() as u16;
+const FLOAT_SAMPLE_BITS: u16 = FLOAT_SAMPLE_BYTES * 8;
+const FLOAT_RIFF_OVERHEAD: u32 = 48;
+const PCM16_FULL_SCALE: f32 = 32768.0;
+const PCM24_FULL_SCALE: f32 = 8388608.0;
+const PCM32_FULL_SCALE: f32 = 2147483648.0;
 pub struct Audio {
     pub samples: Vec<f32>,
     pub channels: u16,
 }
 pub fn read(path: &Path) -> Result<Audio> {
-    let mut data = Vec::new();
-    File::open(path)?
-        .take(MAX_BYTES + 1)
-        .read_to_end(&mut data)?;
-    if data.len() as u64 > MAX_BYTES {
-        return Err(Error::new("WAV input exceeds 64 MiB"));
-    }
+    let data = bounded_read(path, MAX_BYTES)?;
     decode(&data)
 }
 fn u16_at(data: &[u8], i: usize) -> u16 {
@@ -28,30 +35,30 @@ fn u32_at(data: &[u8], i: usize) -> u32 {
     u32::from_le_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]])
 }
 fn decode(data: &[u8]) -> Result<Audio> {
-    if data.len() < 12 || &data[..4] != b"RIFF" || &data[8..12] != b"WAVE" {
+    if data.len() < RIFF_HEADER_BYTES || &data[..4] != b"RIFF" || &data[8..12] != b"WAVE" {
         return Err(Error::new("Expected a little-endian RIFF/WAVE file"));
     }
-    let end = 8usize
+    let end = RIFF_SIZE_PREFIX_BYTES
         .checked_add(u32_at(data, 4) as usize)
         .ok_or_else(|| Error::new("Invalid RIFF size"))?;
     if end != data.len() {
         return Err(Error::new("RIFF length does not match file length"));
     }
     let (mut format, mut audio) = (None, None);
-    let mut p = 12;
+    let mut p = RIFF_HEADER_BYTES;
     while p < end {
-        if end - p < 8 {
+        if end - p < CHUNK_HEADER_BYTES {
             return Err(Error::new("Truncated WAV chunk header"));
         }
         let size = u32_at(data, p + 4) as usize;
-        let start = p + 8;
+        let start = p + CHUNK_HEADER_BYTES;
         let stop = start
             .checked_add(size)
             .filter(|v| *v <= end)
             .ok_or_else(|| Error::new("Truncated WAV chunk"))?;
         match &data[p..p + 4] {
             b"fmt " => {
-                if format.is_some() || size < 16 {
+                if format.is_some() || size < FORMAT_BYTES {
                     return Err(Error::new("Invalid or duplicate WAV format"));
                 }
                 format = Some(&data[start..stop]);
@@ -78,12 +85,15 @@ fn decode(data: &[u8]) -> Result<Audio> {
         u16_at(fmt, 12),
         u16_at(fmt, 14),
     );
-    if rate != 48000 || !(1..=2).contains(&channels) {
+    if rate != RATE as u32 || !(1..=2).contains(&channels) {
         return Err(Error::new(
             "Expected 48000 Hz mono or stereo WAV; convert other sample rates first",
         ));
     }
-    if !matches!((kind, bits), (1, 16 | 24 | 32) | (3, 32)) {
+    if !matches!(
+        (kind, bits),
+        (PCM_FORMAT, 16 | 24 | 32) | (IEEE_FLOAT_FORMAT, FLOAT_SAMPLE_BITS)
+    ) {
         return Err(Error::new("Expected PCM16/24/32 or IEEE float32 WAV"));
     }
     let bytes = usize::from(bits / 8);
@@ -101,16 +111,18 @@ fn decode(data: &[u8]) -> Result<Audio> {
         let mut sum = 0.0f64;
         for s in frame.chunks_exact(bytes) {
             let value = match (kind, bits) {
-                (1, 16) => f32::from(i16::from_le_bytes([s[0], s[1]])) / 32768.0,
-                (1, 24) => {
+                (PCM_FORMAT, 16) => f32::from(i16::from_le_bytes([s[0], s[1]])) / PCM16_FULL_SCALE,
+                (PCM_FORMAT, 24) => {
                     ((i32::from(s[0]) | i32::from(s[1]) << 8 | i32::from(s[2]) << 16) << 8 >> 8)
                         as f32
-                        / 8388608.0
+                        / PCM24_FULL_SCALE
                 }
-                (1, 32) => i32::from_le_bytes([s[0], s[1], s[2], s[3]]) as f32 / 2147483648.0,
+                (PCM_FORMAT, 32) => {
+                    i32::from_le_bytes([s[0], s[1], s[2], s[3]]) as f32 / PCM32_FULL_SCALE
+                }
                 _ => f32::from_le_bytes([s[0], s[1], s[2], s[3]]),
             };
-            if !value.is_finite() || value.abs() > 16.0 {
+            if !value.is_finite() || value.abs() > MAX_SAMPLE_AMPLITUDE {
                 return Err(Error::new("WAV samples must be finite and within ±16"));
             }
             sum += f64::from(value);
@@ -125,26 +137,25 @@ pub fn write_new(path: &Path, samples: &[f32]) -> Result<()> {
     }
     let size = samples
         .len()
-        .checked_mul(4)
+        .checked_mul(usize::from(FLOAT_SAMPLE_BYTES))
         .and_then(|n| u32::try_from(n).ok())
-        .filter(|n| *n <= u32::MAX - 48)
+        .filter(|n| *n <= u32::MAX - FLOAT_RIFF_OVERHEAD)
         .ok_or_else(|| Error::new("Output is too large for RIFF"))?;
-    // The fact chunk gives the sample count for IEEE float WAVE readers.
     let mut out =
         std::io::BufWriter::new(OpenOptions::new().write(true).create_new(true).open(path)?);
     out.write_all(b"RIFF")?;
-    out.write_all(&(size + 48).to_le_bytes())?;
+    out.write_all(&(size + FLOAT_RIFF_OVERHEAD).to_le_bytes())?;
     out.write_all(b"WAVEfmt ")?;
-    out.write_all(&16u32.to_le_bytes())?;
-    out.write_all(&3u16.to_le_bytes())?;
-    out.write_all(&1u16.to_le_bytes())?;
-    out.write_all(&48000u32.to_le_bytes())?;
-    out.write_all(&192000u32.to_le_bytes())?;
-    out.write_all(&4u16.to_le_bytes())?;
-    out.write_all(&32u16.to_le_bytes())?;
+    out.write_all(&(FORMAT_BYTES as u32).to_le_bytes())?;
+    out.write_all(&IEEE_FLOAT_FORMAT.to_le_bytes())?;
+    out.write_all(&OUTPUT_CHANNELS.to_le_bytes())?;
+    out.write_all(&(RATE as u32).to_le_bytes())?;
+    out.write_all(&(RATE as u32 * u32::from(FLOAT_SAMPLE_BYTES)).to_le_bytes())?;
+    out.write_all(&FLOAT_SAMPLE_BYTES.to_le_bytes())?;
+    out.write_all(&FLOAT_SAMPLE_BITS.to_le_bytes())?;
     out.write_all(b"fact")?;
-    out.write_all(&4u32.to_le_bytes())?;
-    out.write_all(&(size / 4).to_le_bytes())?;
+    out.write_all(&u32::from(FLOAT_SAMPLE_BYTES).to_le_bytes())?;
+    out.write_all(&(size / u32::from(FLOAT_SAMPLE_BYTES)).to_le_bytes())?;
     out.write_all(b"data")?;
     out.write_all(&size.to_le_bytes())?;
     for value in samples {

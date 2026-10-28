@@ -18,6 +18,44 @@ def install(source, destination, mode=0o644):
     shutil.copyfile(source, destination)
     destination.chmod(mode)
 
+def write_dependency_notices(doc, platform):
+    metadata = json.loads(subprocess.check_output([
+        'cargo', 'metadata', '--locked', '--offline', '--format-version', '1',
+        '--filter-platform', platform,
+    ], cwd=PROJECT))
+    licenses = []
+    for package in metadata['packages']:
+        if package['name'] == 'clearwave': continue
+        source = Path(package['manifest_path']).parent
+        candidates = {f for f in source.iterdir() if f.is_file() and
+            f.name.upper().startswith(('LICENSE', 'LICENCE', 'COPYING', 'NOTICE', 'COPYRIGHT'))}
+        if package.get('license_file'):
+            candidates.add(source/package['license_file'])
+        for folder in ['LICENSES', 'licenses']:
+            if (source/folder).is_dir(): candidates.update(f for f in (source/folder).rglob('*') if f.is_file())
+        destination = doc/'dependency-licenses'/f"{package['name']}-{package['version']}"
+        for file in sorted(candidates):
+            install(file, destination/file.relative_to(source))
+        fallback = None
+        if not candidates:
+            if 'Apache-2.0' in (package['license'] or ''):
+                fallback = 'Apache-2.0'
+            elif package['license'] == 'CC0-1.0':
+                fallback = 'CC0-1.0'
+            else:
+                raise SystemExit(f"Missing licence notice for {package['name']}")
+            install(PROJECT/'packaging/licenses'/fallback, destination/'LICENSE')
+        destination.mkdir(parents=True, exist_ok=True)
+        (destination/'PACKAGE.json').write_text(json.dumps({
+            'name': package['name'], 'version': package['version'],
+            'authors': package['authors'], 'repository': package['repository'],
+            'declared_license': package['license'],
+            'selected_license_when_no_packaged_notice': fallback,
+        }, indent=2)+'\n')
+        licenses.append({'name': package['name'], 'version': package['version'], 'license': package['license'], 'notice_files': len(candidates), 'fallback_license_text': fallback})
+    (doc/'dependency-licenses.json').write_text(json.dumps(licenses, indent=2)+'\n')
+    return licenses
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', type=Path, default=PROJECT/'bin/clearwave')
@@ -35,10 +73,6 @@ def main():
     dynamic = subprocess.check_output(['readelf', '-d', binary], text=True)
     if '(RPATH)' in dynamic or '(RUNPATH)' in dynamic:
         raise SystemExit('Release executable must not contain a build-machine library path')
-    metadata = json.loads(subprocess.check_output([
-        'cargo', 'metadata', '--locked', '--offline', '--format-version', '1',
-        '--filter-platform', 'x86_64-unknown-linux-gnu',
-    ], cwd=PROJECT))
     args.output.mkdir(parents=True, exist_ok=True)
     manifest = {'version': version, 'architecture': 'amd64', 'build_baseline': 'Ubuntu 24.04 amd64 sysroot',
         'maximum_glibc_symbol': '.'.join(map(str, glibc[-1])),
@@ -64,37 +98,7 @@ def main():
             'Country flag artwork: flag-icons, Copyright (c) 2013 Panayiotis Lipiridis, MIT.\n'
             'See flag-icons-LICENSE and flag-icons-SOURCE.json.\n'
             'No NVIDIA installer, DLL, model package or exported weights are included.\n')
-        licenses = []
-        for package in metadata['packages']:
-            if package['name'] == 'clearwave': continue
-            source = Path(package['manifest_path']).parent
-            candidates = {f for f in source.iterdir() if f.is_file() and
-                f.name.upper().startswith(('LICENSE', 'LICENCE', 'COPYING', 'NOTICE', 'COPYRIGHT'))}
-            if package.get('license_file'):
-                candidates.add(source/package['license_file'])
-            for folder in ['LICENSES', 'licenses']:
-                if (source/folder).is_dir(): candidates.update(f for f in (source/folder).rglob('*') if f.is_file())
-            destination = doc/'dependency-licenses'/f"{package['name']}-{package['version']}"
-            for file in sorted(candidates):
-                install(file, destination/file.relative_to(source))
-            fallback = None
-            if not candidates:
-                if 'Apache-2.0' in (package['license'] or ''):
-                    fallback = 'Apache-2.0'
-                elif package['license'] == 'CC0-1.0':
-                    fallback = 'CC0-1.0'
-                else:
-                    raise SystemExit(f"Missing licence notice for {package['name']}")
-                install(PROJECT/'packaging/licenses'/fallback, destination/'LICENSE')
-            destination.mkdir(parents=True, exist_ok=True)
-            (destination/'PACKAGE.json').write_text(json.dumps({
-                'name': package['name'], 'version': package['version'],
-                'authors': package['authors'], 'repository': package['repository'],
-                'declared_license': package['license'],
-                'selected_license_when_no_packaged_notice': fallback,
-            }, indent=2)+'\n')
-            licenses.append({'name': package['name'], 'version': package['version'], 'license': package['license'], 'notice_files': len(candidates), 'fallback_license_text': fallback})
-        (doc/'dependency-licenses.json').write_text(json.dumps(licenses, indent=2)+'\n')
+        write_dependency_notices(doc, 'x86_64-unknown-linux-gnu')
         for target, label in TARGETS.items():
             root = Path(temporary)/target
             shutil.copytree(base, root)

@@ -1,8 +1,32 @@
 //! Portable Vulkan compute. Hardware selection is explicit; no silent CPU fallback.
-use crate::{Error, Result, package::Model};
+use crate::{
+    Error, Result,
+    operators::{GRU_BIAS_BLOCKS, GRU_GATES},
+    package::Model,
+};
 use serde::Serialize;
-use std::{sync::mpsc, time::Instant};
+use std::{
+    sync::mpsc,
+    time::{Duration, Instant},
+};
+
+const AMD_VENDOR_ID: u32 = 0x1002;
+const MAX_OPERATOR_VALUES: u32 = 64 * 1024 * 1024;
+pub(crate) const OPERATOR_GROUP_SIZE: u32 = 64;
+const READBACK_TIMEOUT: Duration = Duration::from_secs(30);
+const CHECK_ERROR_TOLERANCE: f64 = 0.0001;
 use wgpu::util::DeviceExt;
+
+#[derive(Clone, Copy)]
+#[repr(u32)]
+pub(crate) enum Operator {
+    Convolution,
+    Normalize,
+    Activate,
+    Gru,
+    Concatenate,
+    Project,
+}
 
 #[derive(Debug, Serialize)]
 pub struct AdapterInfo {
@@ -59,8 +83,9 @@ pub struct ComputeReport {
 pub fn check_model(model: &Model, selector: Option<&str>) -> Result<ComputeReport> {
     let gpu = Gpu::new(selector)?;
     let mut checks = Vec::new();
-    // Shapes here describe isolated matrix operations over stored values.
-    // They do not assert the completed network's gate or channel ordering.
+    // Matrix checks deliberately operate on flat stored values.
+    // Their agreement tests arithmetic and transfer accuracy only;
+    // the complete network establishes its own gate and channel layout.
     for (name, rows, cols) in [
         ("noise_gru_1_weights", 768, 320),
         ("noise_gru_1_rweights", 768, 256),
@@ -103,12 +128,12 @@ pub fn check_model(model: &Model, selector: Option<&str>) -> Result<ComputeRepor
             max_absolute_error: absolute,
             max_scaled_error: scaled,
             dispatch_and_readback_ms: ms,
-            passed: finite && scaled < 0.0001,
+            passed: finite && scaled < CHECK_ERROR_TOLERANCE,
         });
     }
     let passed = checks.iter().all(|c| c.passed);
     Ok(ComputeReport {
-        scope: "Isolated weight-matrix operations; full denoiser inference is not implemented",
+        scope: "Isolated stored weight-matrix operations; graph and waveform quality are checked separately",
         adapter: gpu.info,
         checks,
         passed,
@@ -132,7 +157,7 @@ impl Gpu {
         });
         let adapter=adapters.into_iter().find(|a| {
             let i=a.get_info();
-            i.vendor==0x1002 && matches!(i.device_type,wgpu::DeviceType::DiscreteGpu|wgpu::DeviceType::IntegratedGpu)
+            i.vendor==AMD_VENDOR_ID && matches!(i.device_type,wgpu::DeviceType::DiscreteGpu|wgpu::DeviceType::IntegratedGpu)
                 && selector.is_none_or(|s| i.name.to_lowercase().contains(&s.to_lowercase()))
         }).ok_or_else(|| Error::new("No matching AMD Vulkan hardware adapter is accessible. Run gpu-info on the host; software Vulkan is deliberately excluded."))?;
         let info = adapter.get_info().into();
@@ -211,60 +236,13 @@ impl Gpu {
             bytemuck::cast_slice(&shape),
             wgpu::BufferUsages::UNIFORM,
         );
-        let size = (rows * 4) as u64;
-        let output = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("output"),
-            size,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        });
-        let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("readback"),
-            size,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-        let buffers = [&matrix, &vector, &output, &shape];
-        let entries: Vec<_> = buffers
-            .iter()
-            .enumerate()
-            .map(|(i, b)| wgpu::BindGroupEntry {
-                binding: i as u32,
-                resource: b.as_entire_binding(),
-            })
-            .collect();
-        let binding = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("matrix bindings"),
-            layout: &self.pipeline.get_bind_group_layout(0),
-            entries: &entries,
-        });
-        let mut encoder = self.device.create_command_encoder(&Default::default());
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("matrix dispatch"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(&self.pipeline);
-            pass.set_bind_group(0, &binding, &[]);
-            pass.dispatch_workgroups(rows as u32, 1, 1);
-        }
-        encoder.copy_buffer_to_buffer(&output, 0, &staging, 0, size);
-        self.queue.submit([encoder.finish()]);
-        let (tx, rx) = mpsc::channel();
-        staging.slice(..).map_async(wgpu::MapMode::Read, move |r| {
-            let _ = tx.send(r);
-        });
-        self.device
-            .poll(wgpu::PollType::Wait)
-            .map_err(|e| Error::new(format!("Vulkan poll failed: {e}")))?;
-        rx.recv_timeout(std::time::Duration::from_secs(30))
-            .map_err(|e| Error::new(format!("GPU readback timed out: {e}")))?
-            .map_err(|e| Error::new(format!("GPU readback failed: {e}")))?;
-        let view = staging.slice(..).get_mapped_range();
-        let values = bytemuck::cast_slice::<u8, f32>(&view).to_vec();
-        drop(view);
-        staging.unmap();
-        Ok(values)
+        self.dispatch_readback(
+            &self.pipeline,
+            &[&matrix, &vector, &shape],
+            2,
+            rows as u32,
+            rows,
+        )
     }
 
     pub(crate) fn convolution(
@@ -280,7 +258,7 @@ impl Gpu {
         packed.extend(bias);
         self.operator(
             [
-                0,
+                Operator::Convolution as u32,
                 count as u32,
                 shape.channels as u32,
                 shape.height as u32,
@@ -304,23 +282,14 @@ impl Gpu {
         parameters: &[f32],
         channels: usize,
     ) -> Result<Vec<f32>> {
-        if channels == 0
-            || input.is_empty()
-            || !input.len().is_multiple_of(channels)
-            || parameters.len() != 4 * channels
-            || parameters[3 * channels..]
-                .iter()
-                .any(|v| !v.is_finite() || *v < 0.0)
-        {
-            return Err(Error::new("Invalid batch-normalization tensors"));
-        }
+        let spatial = crate::operators::normalization_spatial(input, parameters, channels)?;
         self.operator(
             [
-                1,
+                Operator::Normalize as u32,
                 input.len() as u32,
                 channels as u32,
                 1,
-                (input.len() / channels) as u32,
+                spatial as u32,
                 0,
                 0,
                 0,
@@ -339,7 +308,20 @@ impl Gpu {
             return Err(Error::new("Invalid activation input or mode"));
         }
         self.operator(
-            [2, input.len() as u32, 0, 0, 0, 0, 0, 0, 0, 0, mode, 0],
+            [
+                Operator::Activate as u32,
+                input.len() as u32,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                mode,
+                0,
+            ],
             &[0.0],
             input,
             &[0.0],
@@ -353,12 +335,55 @@ impl Gpu {
         old: &[f32],
     ) -> Result<Vec<f32>> {
         let n = old.len();
-        if n == 0 || x.len() != 3 * n || h.len() != 3 * n || bias.len() != 6 * n {
+        if n == 0
+            || x.len() != GRU_GATES * n
+            || h.len() != GRU_GATES * n
+            || bias.len() != GRU_BIAS_BLOCKS * n
+        {
             return Err(Error::new("GRU tensor size mismatch"));
         }
         let mut packed = bias.to_vec();
         packed.extend(old);
-        self.operator([3, n as u32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], &packed, x, h)
+        self.operator(
+            [Operator::Gru as u32, n as u32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            &packed,
+            x,
+            h,
+        )
+    }
+    pub(crate) fn concatenate_features(
+        &self,
+        noise: &[f32],
+        convolution: &[f32],
+        channels: usize,
+        frequencies: usize,
+    ) -> Result<Vec<f32>> {
+        if noise.is_empty()
+            || channels == 0
+            || frequencies == 0
+            || channels.checked_mul(frequencies) != Some(convolution.len())
+        {
+            return Err(Error::new("Concatenation tensor size mismatch"));
+        }
+        self.operator(
+            [
+                Operator::Concatenate as u32,
+                (noise.len() + convolution.len()) as u32,
+                channels as u32,
+                noise.len() as u32,
+                frequencies as u32,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+            ],
+            &[0.0],
+            noise,
+            convolution,
+        )
     }
     fn operator(
         &self,
@@ -368,7 +393,7 @@ impl Gpu {
         auxiliary: &[f32],
     ) -> Result<Vec<f32>> {
         let count = params[1];
-        if count == 0 || count > 64 * 1024 * 1024 {
+        if count == 0 || count > MAX_OPERATOR_VALUES {
             return Err(Error::new("Invalid operator output size"));
         }
         let data = |label, contents, usage| {
@@ -399,55 +424,88 @@ impl Gpu {
             bytemuck::cast_slice(&params),
             wgpu::BufferUsages::UNIFORM,
         );
-        let size = u64::from(count) * 4;
+        self.dispatch_readback(
+            &self.operators,
+            &[&weights, &input, &auxiliary, &params],
+            3,
+            count.div_ceil(OPERATOR_GROUP_SIZE),
+            count as usize,
+        )
+    }
+    fn dispatch_readback(
+        &self,
+        pipeline: &wgpu::ComputePipeline,
+        inputs: &[&wgpu::Buffer],
+        output_binding: usize,
+        groups: u32,
+        count: usize,
+    ) -> Result<Vec<f32>> {
+        let size = (count * std::mem::size_of::<f32>()) as u64;
         let output = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("operator output"),
+            label: Some("compute output"),
             size,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
         let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("operator readback"),
+            label: Some("compute readback"),
             size,
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
         });
-        let buffers = [&weights, &input, &auxiliary, &output, &params];
+
+        let mut buffers = inputs.to_vec();
+        buffers.insert(output_binding, &output);
         let entries: Vec<_> = buffers
             .iter()
             .enumerate()
-            .map(|(i, b)| wgpu::BindGroupEntry {
-                binding: i as u32,
-                resource: b.as_entire_binding(),
+            .map(|(index, buffer)| wgpu::BindGroupEntry {
+                binding: index as u32,
+                resource: buffer.as_entire_binding(),
             })
             .collect();
         let binding = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("operator bindings"),
-            layout: &self.operators.get_bind_group_layout(0),
+            label: Some("compute bindings"),
+            layout: &pipeline.get_bind_group_layout(0),
             entries: &entries,
         });
+
         let mut encoder = self.device.create_command_encoder(&Default::default());
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("voice operator"),
+                label: Some("compute dispatch"),
                 timestamp_writes: None,
             });
-            pass.set_pipeline(&self.operators);
+            pass.set_pipeline(pipeline);
             pass.set_bind_group(0, &binding, &[]);
-            pass.dispatch_workgroups(count.div_ceil(64), 1, 1);
+            pass.dispatch_workgroups(groups, 1, 1);
         }
         encoder.copy_buffer_to_buffer(&output, 0, &staging, 0, size);
         self.queue.submit([encoder.finish()]);
-        let (tx, rx) = mpsc::channel();
-        staging.slice(..).map_async(wgpu::MapMode::Read, move |r| {
-            let _ = tx.send(r);
-        });
-        self.device
+        self.readback(&staging)
+    }
+    pub(crate) fn readback(&self, staging: &wgpu::Buffer) -> Result<Vec<f32>> {
+        let (sender, receiver) = mpsc::channel();
+        staging
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |result| {
+                let _ = sender.send(result);
+            });
+        let result = self
+            .device
             .poll(wgpu::PollType::Wait)
-            .map_err(|e| Error::new(format!("Vulkan poll failed: {e}")))?;
-        rx.recv_timeout(std::time::Duration::from_secs(30))
-            .map_err(|e| Error::new(format!("GPU readback timed out: {e}")))?
-            .map_err(|e| Error::new(format!("GPU readback failed: {e}")))?;
+            .map_err(|error| Error::new(format!("Vulkan poll failed: {error}")))
+            .and_then(|_| {
+                receiver
+                    .recv_timeout(READBACK_TIMEOUT)
+                    .map_err(|error| Error::new(format!("GPU readback timed out: {error}")))?
+                    .map_err(|error| Error::new(format!("GPU readback failed: {error}")))
+            });
+        if let Err(error) = result {
+            staging.unmap();
+            return Err(error);
+        }
+
         let view = staging.slice(..).get_mapped_range();
         let values = bytemuck::cast_slice::<u8, f32>(&view).to_vec();
         drop(view);

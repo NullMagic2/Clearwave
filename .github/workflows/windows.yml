@@ -1,0 +1,28 @@
+name: Native Windows
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure MSVC resource compiler
+        shell: pwsh
+        run: |
+          $installation = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          & "$installation\Common7\Tools\Launch-VsDevShell.ps1" -Arch amd64 -HostArch amd64 -SkipAutomaticLocation
+          foreach ($name in @("INCLUDE", "LIB", "LIBPATH", "PATH")) {
+            "$name=$([Environment]::GetEnvironmentVariable($name))" >> $env:GITHUB_ENV
+          }
+      - name: Install Rust components
+        run: rustup component add clippy rustfmt
+      - name: Fetch locked dependencies
+        run: cargo fetch --locked
+      - name: Check native Windows source
+        run: cargo clippy --locked --offline --all-targets -- -D warnings
+      - name: Test shared engine and Windows integration
+        run: cargo test --locked --offline -- --test-threads=1
+      - name: Build native interface
+        shell: pwsh
+        run: ./clean_build.ps1

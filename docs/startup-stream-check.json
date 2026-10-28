@@ -1,0 +1,25 @@
+{
+  "scope": "Public quiet-speech waveform, corrected offline path compared with corrected raw streaming path on AMD; no new microphone capture.",
+  "samples": 336000,
+  "max_absolute_error": 0.0,
+  "passed": true,
+  "ready": {
+    "adapter": "AMD Radeon RX 7900 XTX (RADV NAVI31)",
+    "algorithmic_delay_samples": 2880,
+    "event": "stream_ready",
+    "sample_rate": 48000
+  },
+  "finished": {
+    "adapter": "AMD Radeon RX 7900 XTX (RADV NAVI31)",
+    "algorithmic_delay_samples": 2880,
+    "event": "stream_finished",
+    "execution_mode": "resident Vulkan graph",
+    "frames": 706,
+    "initial_context_predictions": 3,
+    "resident_parameter_bytes": 62453348,
+    "sample_rate": 48000,
+    "samples": 336000,
+    "scope": "bounded raw float32 stream; wall time includes input/output waits; PipeWire routing is not created",
+    "wall_elapsed_ms": 519.93563
+  }
+}

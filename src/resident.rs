@@ -1,8 +1,12 @@
 //! Persistent GPU feature graph: one context upload and one mask readback per step.
 use crate::{
     Error, Result,
-    gpu::Gpu,
-    network::{CONTEXT, FEATURES, GAINS},
+    gpu::{Gpu, OPERATOR_GROUP_SIZE, Operator},
+    network::{
+        CENTER_FRAME, CONTEXT, CONVOLUTION_CHANNELS, CONVOLUTION_HEIGHT, CONVOLUTION_WIDTH,
+        FEATURES, GAINS, GRUS, PROJECTION_INPUTS, normalization_parameters,
+    },
+    operators::{GRU_BIAS_BLOCKS, GRU_GATES},
     package::Model,
 };
 use wgpu::util::DeviceExt;
@@ -124,27 +128,46 @@ impl Builder<'_> {
         self.dispatch(
             false,
             &[weights, input, auxiliary, output, shape],
-            params[1].div_ceil(64),
+            params[1].div_ceil(OPERATOR_GROUP_SIZE),
         );
         output
     }
     fn gru(&mut self, name: &str, input: usize, width: usize, hidden: usize) -> Result<usize> {
         let state = self.empty("resident recurrent state", hidden);
-        let projected = self.matvec(&format!("{name}_weights"), input, hidden * 3, width)?;
-        let recurrent = self.matvec(&format!("{name}_rweights"), state, hidden * 3, hidden)?;
+        let projected =
+            self.matvec(&format!("{name}_weights"), input, hidden * GRU_GATES, width)?;
+        let recurrent = self.matvec(
+            &format!("{name}_rweights"),
+            state,
+            hidden * GRU_GATES,
+            hidden,
+        )?;
         let mut packed = self.model.get(&format!("{name}_bias"))?.values.clone();
-        packed.resize(hidden * 7, 0.0);
+        packed.resize(hidden * (GRU_BIAS_BLOCKS + 1), 0.0);
         let parameters = self.data("resident GRU bias and previous state", &packed, true);
         self.weight_bytes -= hidden * 4;
         self.steps.push(Step::Copy {
             source: state,
             destination: parameters,
             source_offset: 0,
-            destination_offset: (hidden * 6 * 4) as u64,
+            destination_offset: (hidden * GRU_BIAS_BLOCKS * 4) as u64,
             bytes: (hidden * 4) as u64,
         });
         let output = self.operator(
-            [3, hidden as u32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [
+                Operator::Gru as u32,
+                hidden as u32,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+            ],
             parameters,
             projected,
             recurrent,
@@ -164,7 +187,6 @@ pub struct ResidentGraph {
     pub weight_bytes: usize,
 }
 impl ResidentGraph {
-    // Network::new validates every model shape before this graph is constructed.
     pub fn new(gpu: &Gpu, model: &Model) -> Result<Self> {
         let mut b = Builder {
             gpu,
@@ -180,53 +202,46 @@ impl ResidentGraph {
         b.steps.push(Step::Copy {
             source: input,
             destination: center,
-            source_offset: (3 * FEATURES * 4) as u64,
+            source_offset: (CENTER_FRAME * FEATURES * 4) as u64,
             destination_offset: 0,
             bytes: (FEATURES * 4) as u64,
         });
         let (mut x, mut channels, mut height) = (input, 1, CONTEXT);
-        for (i, output_channels) in [16, 24, 32].into_iter().enumerate() {
+        for (i, output_channels) in CONVOLUTION_CHANNELS.into_iter().enumerate() {
             let mut packed = model
                 .get(&format!("conv2d_out{}_1_weights", i + 1))?
                 .values
                 .clone();
             packed.extend_from_slice(&model.get(&format!("conv2d_out{}_1_bias", i + 1))?.values);
             let weights = b.data("resident convolution weights and bias", &packed, true);
-            let count = output_channels * (height - 2) * FEATURES;
+            let count = output_channels * (height - (CONVOLUTION_HEIGHT - 1)) * FEATURES;
             x = b.operator(
                 [
-                    0,
+                    Operator::Convolution as u32,
                     count as u32,
                     channels as u32,
                     height as u32,
                     FEATURES as u32,
                     output_channels as u32,
-                    (height - 2) as u32,
-                    3,
-                    5,
-                    2,
-                    1,
+                    (height - (CONVOLUTION_HEIGHT - 1)) as u32,
+                    CONVOLUTION_HEIGHT as u32,
+                    CONVOLUTION_WIDTH as u32,
+                    (CONVOLUTION_WIDTH / 2) as u32,
+                    u32::from(true),
                     0,
                 ],
                 weights,
                 x,
                 dummy,
             );
-            let mut parameters = Vec::new();
-            for suffix in ["gamma", "beta", "mean", "var"] {
-                parameters.extend_from_slice(
-                    &model
-                        .get(&format!("batch_normalization_{}_{suffix}", i + 1))?
-                        .values,
-                );
-            }
+            let parameters = normalization_parameters(model, i)?;
             let parameters = b.data("resident normalization parameters", &parameters, true);
             x = b.operator(
                 [
-                    1,
+                    Operator::Normalize as u32,
                     count as u32,
                     output_channels as u32,
-                    (height - 2) as u32,
+                    (height - (CONVOLUTION_HEIGHT - 1)) as u32,
                     FEATURES as u32,
                     0,
                     0,
@@ -241,24 +256,52 @@ impl ResidentGraph {
                 dummy,
             );
             channels = output_channels;
-            height -= 2;
+            height -= CONVOLUTION_HEIGHT - 1;
         }
-        let noise = b.gru("noise_gru_1", center, 320, 256)?;
-        let combined = b.operator([4, 10496, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dummy, noise, x);
+        let (name, width, hidden) = GRUS[0];
+        let noise = b.gru(name, center, width, hidden)?;
+        let combined = b.operator(
+            [
+                Operator::Concatenate as u32,
+                GRUS[1].1 as u32,
+                channels as u32,
+                hidden as u32,
+                FEATURES as u32,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+            ],
+            dummy,
+            noise,
+            x,
+        );
         x = combined;
-        for (name, width, hidden) in [
-            ("noise_denoise_gru_1_1", 10496, 256),
-            ("noise_denoise_gru_2_1", 256, 512),
-            ("noise_denoise_gru_3_1", 512, 1024),
-        ] {
+        for (name, width, hidden) in GRUS.into_iter().skip(1) {
             x = b.gru(name, x, width, hidden)?;
         }
         let projection = crate::network::projection_weights(model)?;
         let weights = b.data("output projection in execution order", &projection, true);
-        let logits = b.matvec_buffer(weights, x, GAINS, 1024);
+        let logits = b.matvec_buffer(weights, x, GAINS, PROJECTION_INPUTS);
         let bias = b.weight("noise_denoise_filter_1_bias")?;
         let output = b.operator(
-            [5, GAINS as u32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [
+                Operator::Project as u32,
+                GAINS as u32,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+            ],
             bias,
             logits,
             dummy,
@@ -325,36 +368,16 @@ impl ResidentGraph {
             (GAINS * 4) as u64,
         );
         gpu.queue.submit([encoder.finish()]);
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.staging
-            .slice(..)
-            .map_async(wgpu::MapMode::Read, move |result| {
-                let _ = tx.send(result);
-            });
-        let result = gpu
-            .device
-            .poll(wgpu::PollType::Wait)
-            .map_err(|e| Error::new(format!("Resident GPU poll failed: {e}")))
-            .and_then(|_| {
-                rx.recv_timeout(std::time::Duration::from_secs(30))
-                    .map_err(|e| Error::new(format!("Resident mask readback timed out: {e}")))?
-                    .map_err(|e| Error::new(format!("Resident mask readback failed: {e}")))
-            });
-        if let Err(error) = result {
-            self.staging.unmap();
-            return Err(error);
-        }
-        let view = self.staging.slice(..).get_mapped_range();
-        let mask = bytemuck::cast_slice::<u8, f32>(&view).to_vec();
-        drop(view);
-        self.staging.unmap();
+        let mask = gpu.readback(&self.staging)?;
         if mask
             .iter()
             .any(|x| !x.is_finite() || !(0.0..=1.0).contains(x))
         {
             return Err(Error::new("Resident graph produced an invalid noise mask"));
         }
-        // Commit only after successful readback and validation; failed steps retain old state.
+        // Candidate states remain separate until readback and mask validation succeed.
+        // A failed frame must leave the previous recurrent state available.
+        // Commit copies are queued after the complete inference dispatch sequence.
         let mut commit = gpu.device.create_command_encoder(&Default::default());
         for (state, candidate) in &self.states {
             commit.copy_buffer_to_buffer(

@@ -11,19 +11,35 @@ use serde::Serialize;
 pub const FEATURES: usize = 320;
 pub const CONTEXT: usize = 7;
 pub const GAINS: usize = 961;
-const GRUS: [(&str, usize, usize); 4] = [
-    ("noise_gru_1", 320, 256),
-    ("noise_denoise_gru_1_1", 10496, 256),
+pub(crate) const SUPPORTED_TENSOR_COUNT: usize = 32;
+pub(crate) const CENTER_FRAME: usize = CONTEXT / 2;
+pub(crate) const CONVOLUTION_CHANNELS: [usize; 3] = [16, 24, 32];
+pub(crate) const CONVOLUTION_HEIGHT: usize = 3;
+pub(crate) const CONVOLUTION_WIDTH: usize = 5;
+pub(crate) const PROJECTION_INPUTS: usize = 1024;
+pub(crate) const NOISE_HIDDEN: usize = 256;
+pub(crate) const CONVOLUTION_FEATURES: usize = CONVOLUTION_CHANNELS[2] * FEATURES;
+pub(crate) const COMBINED_FEATURES: usize = NOISE_HIDDEN + CONVOLUTION_FEATURES;
+pub(crate) const GRUS: [(&str, usize, usize); 4] = [
+    ("noise_gru_1", FEATURES, NOISE_HIDDEN),
+    ("noise_denoise_gru_1_1", COMBINED_FEATURES, 256),
     ("noise_denoise_gru_2_1", 256, 512),
-    ("noise_denoise_gru_3_1", 512, 1024),
+    ("noise_denoise_gru_3_1", 512, PROJECTION_INPUTS),
 ];
 
 #[derive(Serialize)]
 pub struct LayerSpec {
     pub name: String,
+    pub sources: Vec<String>,
     pub input: Vec<usize>,
     pub output: Vec<usize>,
     pub operation: &'static str,
+}
+#[derive(Serialize)]
+pub struct TensorSpec {
+    pub name: String,
+    pub stored_shape: Vec<usize>,
+    pub layout: &'static str,
 }
 #[derive(Serialize)]
 pub struct GraphSpec {
@@ -31,54 +47,151 @@ pub struct GraphSpec {
     pub feature_bins: usize,
     pub output_gains: usize,
     pub layers: Vec<LayerSpec>,
+    pub tensors: Vec<TensorSpec>,
     pub layout: &'static str,
     pub vendor_output_parity: &'static str,
 }
 pub fn specification(model: &Model) -> Result<GraphSpec> {
+    let graph = definition();
+    for tensor in &graph.tensors {
+        check_size(model, &tensor.name, tensor.stored_shape.iter().product())?;
+    }
+    Ok(graph)
+}
+
+fn definition() -> GraphSpec {
     let mut layers = Vec::new();
+    let mut tensors = Vec::new();
     let mut channels = 1;
-    let mut height = 7;
-    for (i, output) in [16, 24, 32].into_iter().enumerate() {
+    let mut height = CONTEXT;
+    let mut source = "feature_context".to_owned();
+
+    for (i, output) in CONVOLUTION_CHANNELS.into_iter().enumerate() {
         let prefix = format!("conv2d_out{}_1", i + 1);
-        check_size(
-            model,
-            &format!("{prefix}_weights"),
-            output * channels * 3 * 5,
-        )?;
-        check_size(model, &format!("{prefix}_bias"), output)?;
+        tensors.push(TensorSpec {
+            name: format!("{prefix}_weights"),
+            stored_shape: vec![output, channels, CONVOLUTION_HEIGHT, CONVOLUTION_WIDTH],
+            layout: "output, input, time, frequency",
+        });
+        tensors.push(TensorSpec {
+            name: format!("{prefix}_bias"),
+            stored_shape: vec![output],
+            layout: "output channel",
+        });
+
         for suffix in ["gamma", "beta", "mean", "var"] {
-            check_size(
-                model,
-                &format!("batch_normalization_{}_{suffix}", i + 1),
-                output,
-            )?;
+            tensors.push(TensorSpec {
+                name: format!("batch_normalization_{}_{suffix}", i + 1),
+                stored_shape: vec![output],
+                layout: "channel",
+            });
         }
-        layers.push(LayerSpec{name:prefix,input:vec![channels,height,FEATURES],output:vec![output,height-2,FEATURES],operation:"3x5 cross-correlation, frequency padding 2, ReLU, batch normalization epsilon 0.001"});
+        height -= CONVOLUTION_HEIGHT - 1;
+        let dimensions = vec![output, height, FEATURES];
+        layers.push(LayerSpec {
+            name: prefix.clone(),
+            sources: vec![source],
+            input: vec![channels, height + CONVOLUTION_HEIGHT - 1, FEATURES],
+            output: dimensions.clone(),
+            operation: "3x5 cross-correlation, stride 1, time padding 0, frequency padding 2, bias, ReLU",
+        });
+        source = format!("batch_normalization_{}", i + 1);
+        layers.push(LayerSpec {
+            name: source.clone(),
+            sources: vec![prefix],
+            input: dimensions.clone(),
+            output: dimensions,
+            operation: "per-channel inference normalization, gamma/beta/mean/variance, epsilon 0.001; no following ReLU",
+        });
         channels = output;
-        height -= 2;
     }
-    for (name, input, hidden) in GRUS {
-        check_size(model, &format!("{name}_weights"), 3 * hidden * input)?;
-        check_size(model, &format!("{name}_rweights"), 3 * hidden * hidden)?;
-        check_size(model, &format!("{name}_bias"), 6 * hidden)?;
-        layers.push(LayerSpec{name:name.into(),input:vec![input],output:vec![hidden],operation:"stateful reset-after GRU, reset/update/new gates, separate input/recurrent bias"});
+    layers.push(LayerSpec {
+        name: "convolution_features".into(),
+        sources: vec![source],
+        input: vec![channels, height, FEATURES],
+        output: vec![CONVOLUTION_FEATURES],
+        operation: "permute channel/time/frequency to time/frequency/channel, then flatten",
+    });
+    layers.push(LayerSpec {
+        name: "center_frame".into(),
+        sources: vec!["feature_context".into()],
+        input: vec![CONTEXT, FEATURES],
+        output: vec![FEATURES],
+        operation: "select context index 3, aligned with the center of the convolution receptive field",
+    });
+
+    for (index, (name, input, hidden)) in GRUS.into_iter().enumerate() {
+        if index == 1 {
+            layers.push(LayerSpec {
+                name: "combined_features".into(),
+                sources: vec![GRUS[0].0.into(), "convolution_features".into()],
+                input: vec![NOISE_HIDDEN, CONVOLUTION_FEATURES],
+                output: vec![COMBINED_FEATURES],
+                operation: "concatenate noise hidden output first, then frequency-major convolution features",
+            });
+        }
+        for (suffix, shape, layout) in [
+            (
+                "weights",
+                vec![operators::GRU_GATES, hidden, input],
+                "reset/update/new, output, input",
+            ),
+            (
+                "rweights",
+                vec![operators::GRU_GATES, hidden, hidden],
+                "reset/update/new, output, previous hidden",
+            ),
+            (
+                "bias",
+                vec![2, operators::GRU_GATES, hidden],
+                "input/recurrent, reset/update/new, hidden",
+            ),
+        ] {
+            tensors.push(TensorSpec {
+                name: format!("{name}_{suffix}"),
+                stored_shape: shape,
+                layout,
+            });
+        }
+        let source = match index {
+            0 => "center_frame",
+            1 => "combined_features",
+            _ => GRUS[index - 1].0,
+        };
+        layers.push(LayerSpec {
+            name: name.into(),
+            sources: vec![source.into()],
+            input: vec![input],
+            output: vec![hidden],
+            operation: "stateful reset-after GRU, reset/update/new gates, separate input/recurrent bias, zero initial hidden",
+        });
     }
-    check_size(model, "noise_denoise_filter_1_weights", GAINS * 1024)?;
-    check_size(model, "noise_denoise_filter_1_bias", GAINS)?;
+    tensors.push(TensorSpec {
+        name: "noise_denoise_filter_1_weights".into(),
+        stored_shape: vec![PROJECTION_INPUTS, GAINS],
+        layout: "input neuron, output frequency; transpose once for execution",
+    });
+    tensors.push(TensorSpec {
+        name: "noise_denoise_filter_1_bias".into(),
+        stored_shape: vec![GAINS],
+        layout: "output frequency",
+    });
     layers.push(LayerSpec {
         name: "noise_denoise_filter_1".into(),
-        input: vec![1024],
+        sources: vec![GRUS[GRUS.len() - 1].0.into()],
+        input: vec![PROJECTION_INPUTS],
         output: vec![GAINS],
         operation: "input-major stored projection, transposed once for matvec, dense + sigmoid",
     });
-    Ok(GraphSpec {
+    GraphSpec {
         input_context: CONTEXT,
         feature_bins: FEATURES,
         output_gains: GAINS,
         layers,
+        tensors,
         layout: "Convolutions NCHW/OIHW; recurrent input is center frame; concatenate recurrent output then frequency-major convolution features",
         vendor_output_parity: "not established; offline waveform adapter implemented with documented boundaries",
-    })
+    }
 }
 fn check_size(model: &Model, name: &str, size: usize) -> Result<()> {
     let t = model.get(name)?;
@@ -92,13 +205,26 @@ fn check_size(model: &Model, name: &str, size: usize) -> Result<()> {
 }
 
 /// The stored output projection is [input neuron, frequency bin].
-/// Execution kernels consume [output row, input column]; convert once at setup.
+/// Execution kernels consume [output row, input column].
+/// Convert once at setup so CPU and GPU share the same matrix contract.
 pub(crate) fn projection_weights(model: &Model) -> Result<Vec<f32>> {
     operators::transpose_matrix(
         &model.get("noise_denoise_filter_1_weights")?.values,
-        1024,
+        PROJECTION_INPUTS,
         GAINS,
     )
+}
+
+pub(crate) fn normalization_parameters(model: &Model, layer: usize) -> Result<Vec<f32>> {
+    let mut parameters = Vec::new();
+    for suffix in ["gamma", "beta", "mean", "var"] {
+        parameters.extend_from_slice(
+            &model
+                .get(&format!("batch_normalization_{}_{suffix}", layer + 1))?
+                .values,
+        );
+    }
+    Ok(parameters)
 }
 
 pub enum Backend {
@@ -157,7 +283,7 @@ impl Backend {
 pub struct Network<'a> {
     model: &'a Model,
     pub backend: Backend,
-    state: [Vec<f32>; 4],
+    state: [Vec<f32>; GRUS.len()],
     resident: Option<ResidentGraph>,
     projection: Vec<f32>,
     steps: usize,
@@ -216,19 +342,21 @@ impl<'a> Network<'a> {
             self.steps += 1;
             return Ok(output);
         }
-        // State is committed only after every operation has succeeded.
+        // Stage candidate states until every operator and output check succeeds.
+        // Failures must preserve the previous context for deterministic retries.
+        // The resident GPU graph follows the same commit boundary.
         let mut state = self.state.clone();
         let mut x = context.to_vec();
         let mut channels = 1;
         let mut height = CONTEXT;
-        for (i, output_channels) in [16, 24, 32].into_iter().enumerate() {
+        for (i, output_channels) in CONVOLUTION_CHANNELS.into_iter().enumerate() {
             let shape = ConvShape {
                 channels,
                 height,
                 width: FEATURES,
                 output_channels,
-                kernel_height: 3,
-                kernel_width: 5,
+                kernel_height: CONVOLUTION_HEIGHT,
+                kernel_width: CONVOLUTION_WIDTH,
                 relu: true,
             };
             x = self.backend.convolution(
@@ -237,23 +365,16 @@ impl<'a> Network<'a> {
                 self.values(&format!("conv2d_out{}_1_bias", i + 1))?,
                 shape,
             )?;
-            let mut p = Vec::with_capacity(output_channels * 4);
-            for suffix in ["gamma", "beta", "mean", "var"] {
-                p.extend(self.values(&format!("batch_normalization_{}_{suffix}", i + 1))?);
-            }
+            let p = normalization_parameters(self.model, i)?;
             x = self.backend.normalize(&x, &p, output_channels)?;
             channels = output_channels;
-            height -= 2;
+            height -= CONVOLUTION_HEIGHT - 1;
         }
-        let mut combined = self.gru(0, &context[3 * FEATURES..4 * FEATURES], &mut state)?;
-        // The final convolution has one time row; flatten with channels innermost.
-        for f in 0..FEATURES {
-            for c in 0..32 {
-                combined.push(x[c * FEATURES + f]);
-            }
-        }
+        let center = &context[CENTER_FRAME * FEATURES..(CENTER_FRAME + 1) * FEATURES];
+        let noise = self.gru(0, center, &mut state)?;
+        let combined = operators::concatenate_features(&noise, &x, channels, FEATURES)?;
         let mut x = combined;
-        for i in 1..4 {
+        for i in 1..GRUS.len() {
             x = self.gru(i, &x, &mut state)?;
         }
         let mut logits = self.backend.matvec(&self.projection, &x, GAINS)?;
@@ -277,18 +398,20 @@ impl<'a> Network<'a> {
     fn values(&self, name: &str) -> Result<&[f32]> {
         Ok(&self.model.get(name)?.values)
     }
-    fn gru(&self, index: usize, x: &[f32], state: &mut [Vec<f32>; 4]) -> Result<Vec<f32>> {
+    fn gru(&self, index: usize, x: &[f32], state: &mut [Vec<f32>; GRUS.len()]) -> Result<Vec<f32>> {
         let (name, input, hidden) = GRUS[index];
         if x.len() != input {
             return Err(Error::new(format!("Incorrect input width for {name}")));
         }
-        let a = self
-            .backend
-            .matvec(self.values(&format!("{name}_weights"))?, x, 3 * hidden)?;
+        let a = self.backend.matvec(
+            self.values(&format!("{name}_weights"))?,
+            x,
+            operators::GRU_GATES * hidden,
+        )?;
         let b = self.backend.matvec(
             self.values(&format!("{name}_rweights"))?,
             &state[index],
-            3 * hidden,
+            operators::GRU_GATES * hidden,
         )?;
         let out = self.backend.gru_update(
             &a,
@@ -334,19 +457,48 @@ pub fn check_operators(model: &Model, selector: Option<&str>) -> Result<Operator
     let gpu = Backend::amd(selector)?;
     let cpu = Backend::Cpu;
     let mut checks = Vec::new();
+
+    if let Backend::Gpu(device) = &gpu {
+        let noise = [90.0, 91.0];
+        let convolution = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        checks.push(compare(
+            "asymmetric_concatenation_layout",
+            &device.concatenate_features(&noise, &convolution, 2, 3)?,
+            &[90.0, 91.0, 1.0, 4.0, 2.0, 5.0, 3.0, 6.0],
+        ));
+    }
+    let activated = gpu.convolution(
+        &[-3.0, 2.0],
+        &[1.0],
+        &[0.0],
+        ConvShape {
+            channels: 1,
+            height: 1,
+            width: 2,
+            output_channels: 1,
+            kernel_height: 1,
+            kernel_width: 1,
+            relu: true,
+        },
+    )?;
+    checks.push(compare(
+        "relu_before_normalization_preserves_negative_normalized_values",
+        &gpu.normalize(&activated, &[2.0, -1.0, 1.0, 0.999], 1)?,
+        &[-3.0, 1.0],
+    ));
     let mut channels = 1;
-    let mut height = 7;
+    let mut height = CONTEXT;
     let mut x: Vec<f32> = (0..CONTEXT * FEATURES)
         .map(|i| (i % 97) as f32 / 9700.0)
         .collect();
-    for (i, output_channels) in [16, 24, 32].into_iter().enumerate() {
+    for (i, output_channels) in CONVOLUTION_CHANNELS.into_iter().enumerate() {
         let shape = ConvShape {
             channels,
             height,
             width: FEATURES,
             output_channels,
-            kernel_height: 3,
-            kernel_width: 5,
+            kernel_height: CONVOLUTION_HEIGHT,
+            kernel_width: CONVOLUTION_WIDTH,
             relu: true,
         };
         let w = &model.get(&format!("conv2d_out{}_1_weights", i + 1))?.values;
@@ -354,20 +506,13 @@ pub fn check_operators(model: &Model, selector: Option<&str>) -> Result<Operator
         let a = gpu.convolution(&x, w, b, shape)?;
         let e = cpu.convolution(&x, w, b, shape)?;
         checks.push(compare(format!("convolution_{}", i + 1), &a, &e));
-        let mut p = Vec::new();
-        for suffix in ["gamma", "beta", "mean", "var"] {
-            p.extend(
-                &model
-                    .get(&format!("batch_normalization_{}_{suffix}", i + 1))?
-                    .values,
-            );
-        }
+        let p = normalization_parameters(model, i)?;
         let a = gpu.normalize(&e, &p, output_channels)?;
         let e = cpu.normalize(&e, &p, output_channels)?;
         checks.push(compare(format!("batch_normalization_{}", i + 1), &a, &e));
         x = e;
         channels = output_channels;
-        height -= 2;
+        height -= CONVOLUTION_HEIGHT - 1;
     }
     for mode in 0..3 {
         let x = [-1000.0, -40.0, -1.0, 0.0, 1.0, 40.0, 1000.0];
@@ -386,8 +531,8 @@ pub fn check_operators(model: &Model, selector: Option<&str>) -> Result<Operator
             let x: Vec<f32> = (0..input)
                 .map(|i| ((i * 17 + step * 7) % 71) as f32 / 7100.0)
                 .collect();
-            let a = cpu.matvec(w, &x, hidden * 3)?;
-            let b = cpu.matvec(rw, &state, hidden * 3)?;
+            let a = cpu.matvec(w, &x, hidden * operators::GRU_GATES)?;
+            let b = cpu.matvec(rw, &state, hidden * operators::GRU_GATES)?;
             let expected = cpu.gru_update(&a, &b, bias, &state)?;
             let actual = gpu.gru_update(&a, &b, bias, &state)?;
             checks.push(compare(format!("{name}_update_{step}"), &actual, &expected));
@@ -444,4 +589,48 @@ pub fn check_operators(model: &Model, selector: Option<&str>) -> Result<Operator
         passed,
         scope: "CPU/AMD agreement for operators and feature graph; vendor audio-output parity is pending",
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn graph_defines_every_connection_and_stored_tensor() {
+        let graph = definition();
+        let mut available: HashSet<&str> = HashSet::from(["feature_context"]);
+        for layer in &graph.layers {
+            assert!(!layer.sources.is_empty());
+            assert!(
+                layer
+                    .sources
+                    .iter()
+                    .all(|source| available.contains(source.as_str()))
+            );
+            assert!(available.insert(&layer.name));
+        }
+        assert_eq!(graph.tensors.len(), SUPPORTED_TENSOR_COUNT);
+        let unique: HashSet<_> = graph.tensors.iter().map(|tensor| &tensor.name).collect();
+        assert_eq!(unique.len(), graph.tensors.len());
+
+        let projection = graph
+            .tensors
+            .iter()
+            .find(|tensor| tensor.name == "noise_denoise_filter_1_weights")
+            .unwrap();
+        assert_eq!(projection.stored_shape, [PROJECTION_INPUTS, GAINS]);
+        let combination = graph
+            .layers
+            .iter()
+            .find(|layer| layer.name == "combined_features")
+            .unwrap();
+        assert_eq!(combination.sources, [GRUS[0].0, "convolution_features"]);
+        assert_eq!(combination.output, [GRUS[1].1]);
+        assert_eq!(GRUS[GRUS.len() - 1].2, PROJECTION_INPUTS);
+        assert_eq!(
+            CONTEXT - CONVOLUTION_CHANNELS.len() * (CONVOLUTION_HEIGHT - 1),
+            1
+        );
+    }
 }

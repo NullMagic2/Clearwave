@@ -1,0 +1,114 @@
+{
+  "scope": "Exploratory level scaling before inference with exact reciprocal output scaling; public speech only; no default processing change.",
+  "cases": [
+    {
+      "rms": 0.006,
+      "noisy": false,
+      "normalized": false,
+      "factor": 1.0,
+      "voice_projection_gain_db": -0.011313017499772041,
+      "si_sdr_db": 32.58576355113203,
+      "tail_rms_dbfs": -240.0
+    },
+    {
+      "rms": 0.006,
+      "noisy": false,
+      "normalized": true,
+      "factor": 7.248413756356607,
+      "voice_projection_gain_db": -0.08553815820085033,
+      "si_sdr_db": 22.122561584226265,
+      "tail_rms_dbfs": -240.0
+    },
+    {
+      "rms": 0.006,
+      "noisy": true,
+      "normalized": false,
+      "factor": 1.0,
+      "voice_projection_gain_db": -0.2842355688616079,
+      "si_sdr_db": 19.662647936043253,
+      "tail_rms_dbfs": -98.50004194620844
+    },
+    {
+      "rms": 0.006,
+      "noisy": true,
+      "normalized": true,
+      "factor": 6.773483261857861,
+      "voice_projection_gain_db": -0.35401671276442587,
+      "si_sdr_db": 20.241215505986695,
+      "tail_rms_dbfs": -87.8991323551905
+    },
+    {
+      "rms": 0.02,
+      "noisy": false,
+      "normalized": false,
+      "factor": 1.0,
+      "voice_projection_gain_db": -0.06774852332462158,
+      "si_sdr_db": 23.4236151353752,
+      "tail_rms_dbfs": -240.0
+    },
+    {
+      "rms": 0.02,
+      "noisy": false,
+      "normalized": true,
+      "factor": 2.1745241269069817,
+      "voice_projection_gain_db": -0.08553815820084837,
+      "si_sdr_db": 22.12256158422627,
+      "tail_rms_dbfs": -240.0
+    },
+    {
+      "rms": 0.02,
+      "noisy": true,
+      "normalized": false,
+      "factor": 1.0,
+      "voice_projection_gain_db": -0.3688067915266222,
+      "si_sdr_db": 19.634094786158766,
+      "tail_rms_dbfs": -81.6725827567366
+    },
+    {
+      "rms": 0.02,
+      "noisy": true,
+      "normalized": true,
+      "factor": 2.0320449785573587,
+      "voice_projection_gain_db": -0.3540167127644289,
+      "si_sdr_db": 20.241215505986688,
+      "tail_rms_dbfs": -77.44155744958374
+    },
+    {
+      "rms": 0.06,
+      "noisy": false,
+      "normalized": false,
+      "factor": 1.0,
+      "voice_projection_gain_db": -0.11651803133187492,
+      "si_sdr_db": 20.272386998492312,
+      "tail_rms_dbfs": -240.0
+    },
+    {
+      "rms": 0.06,
+      "noisy": false,
+      "normalized": true,
+      "factor": 1.0,
+      "voice_projection_gain_db": -0.11651803133187492,
+      "si_sdr_db": 20.272386998492312,
+      "tail_rms_dbfs": -240.0
+    },
+    {
+      "rms": 0.06,
+      "noisy": true,
+      "normalized": false,
+      "factor": 1.0,
+      "voice_projection_gain_db": -0.3654436993798826,
+      "si_sdr_db": 20.27054348231248,
+      "tail_rms_dbfs": -67.25951567517406
+    },
+    {
+      "rms": 0.06,
+      "noisy": true,
+      "normalized": true,
+      "factor": 1.0,
+      "voice_projection_gain_db": -0.3654436993798826,
+      "si_sdr_db": 20.27054348231248,
+      "tail_rms_dbfs": -67.25951567517406
+    }
+  ],
+  "decision": "Exploratory global level scaling was not adopted: noisy speech SI-SDR improved slightly, but clean speech distortion and noise-tail levels worsened. This is not a test of the full reference stateful conditioner."
+}

@@ -1,0 +1,8 @@
+#include <windows.h>
+1 RT_MANIFEST "clearwave.manifest"
+1 ICON "clearwave.ico"
+301 BITMAP "pt.bmp"
+302 BITMAP "br.bmp"
+303 BITMAP "gr.bmp"
+304 BITMAP "es.bmp"
+305 BITMAP "gb.bmp"

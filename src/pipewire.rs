@@ -16,6 +16,12 @@ use std::{
     time::{Duration, Instant},
 };
 
+const NODE_START_TIMEOUT: Duration = Duration::from_secs(5);
+const NODE_RECHECK_INTERVAL: Duration = Duration::from_secs(1);
+const SIGNAL_POLL_MS: u16 = 20;
+const MIN_LIVE_SECONDS: f64 = 0.1;
+const MAX_LIVE_SECONDS: f64 = 86400.0;
+
 const INPUT: &str = "clearwave.input";
 const MICROPHONE: &str = "clearwave.microphone";
 #[derive(Serialize)]
@@ -170,7 +176,9 @@ impl Drop for Children {
     }
 }
 fn child_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
-    // GNU env restores child signal delivery after the parent's scoped signal mask.
+    // Live processing blocks termination signals so the owning loop handles cleanup.
+    // Child clients need their default signal delivery restored before execution.
+    // Parent-death termination also removes temporary routing after a forced exit.
     let mut command = Command::new("setpriv");
     command
         .args(["--pdeathsig", "KILL", "--", "env"])
@@ -192,7 +200,7 @@ impl LiveOptions {
     pub fn parse(args: &[PathBuf]) -> Result<Self> {
         let mut options = Self {
             strength: 1.0,
-            latency_ms: 10,
+            latency_ms: crate::controls::DEFAULT_LATENCY_MS,
             adapter: None,
             seconds: None,
             meters: false,
@@ -234,12 +242,14 @@ impl LiveOptions {
             }
         }
         crate::audio::validate_strength(options.strength)?;
-        if !(5..=100).contains(&options.latency_ms) {
+        if !(crate::controls::MIN_LATENCY_MS..=crate::controls::MAX_LATENCY_MS)
+            .contains(&options.latency_ms)
+        {
             return Err(Error::new("PipeWire latency request must be 5–100 ms"));
         }
         if options
             .seconds
-            .is_some_and(|s| !s.is_finite() || !(0.1..=86400.0).contains(&s))
+            .is_some_and(|s| !s.is_finite() || !(MIN_LIVE_SECONDS..=MAX_LIVE_SECONDS).contains(&s))
         {
             return Err(Error::new("Live duration must be 0.1–86400 seconds"));
         }
@@ -248,7 +258,6 @@ impl LiveOptions {
 }
 
 pub fn live(bundle: &Path, selector: &str, options: LiveOptions) -> Result<()> {
-    // Validate assets before making any audio nodes.
     crate::load(bundle)?;
     let available = nodes()?;
     if available
@@ -284,9 +293,9 @@ pub fn live(bundle: &Path, selector: &str, options: LiveOptions) -> Result<()> {
             &playback_props.to_string(),
         ]),
     )?;
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + NODE_START_TIMEOUT;
     let microphone = loop {
-        if signals.stopped(20)? {
+        if signals.stopped(SIGNAL_POLL_MS)? {
             return Ok(());
         }
         children.check()?;
@@ -361,7 +370,7 @@ pub fn live(bundle: &Path, selector: &str, options: LiveOptions) -> Result<()> {
     let start = Instant::now();
     let mut last_check = Instant::now();
     loop {
-        if signals.stopped(20)? {
+        if signals.stopped(SIGNAL_POLL_MS)? {
             break;
         }
         if options
@@ -371,7 +380,7 @@ pub fn live(bundle: &Path, selector: &str, options: LiveOptions) -> Result<()> {
             break;
         }
         children.check()?;
-        if last_check.elapsed() >= Duration::from_secs(1) {
+        if last_check.elapsed() >= NODE_RECHECK_INTERVAL {
             if !nodes()?
                 .iter()
                 .any(|n| n.name == source.name && n.serial == source.serial)

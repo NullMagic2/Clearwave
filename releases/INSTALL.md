@@ -1,17 +1,18 @@
-# Clearwave 0.6.6 — Linux packages
+# Clearwave 0.7.0 — Linux packages
 
-**Experimental speech-quality update.** This build corrects a model projection
-layout error that could suppress speech and implements conditional intensity
-handling. Muffled speech and residual static remain unresolved in a local
-microphone sample; equivalence to NVIDIA's output has not been established.
+**Experimental release.** This build completes the supported feature-graph
+mapping and corrects recurrent-state startup ordering. It also adds a native
+Windows interface; these Linux packages continue to use GTK3 and PipeWire.
+Muffled speech, residual static, and equivalence to NVIDIA's output remain
+unresolved.
 
 Download the matching **amd64 / x86-64** package:
 
 | Distribution | File |
 | --- | --- |
-| Debian 13 | `clearwave_0.6.6-1+debian13_amd64.deb` |
-| Ubuntu 24.04 LTS or newer | `clearwave_0.6.6-1+ubuntu24.04_amd64.deb` |
-| Linux Mint 22.x | `clearwave_0.6.6-1+mint22_amd64.deb` |
+| Debian 13 | `clearwave_0.7.0-1+debian13_amd64.deb` |
+| Ubuntu 24.04 LTS or newer | `clearwave_0.7.0-1+ubuntu24.04_amd64.deb` |
+| Linux Mint 22.x | `clearwave_0.7.0-1+mint22_amd64.deb` |
 
 The three packages contain the same compatible executable. They are local,
 unsigned builds. Older distribution releases and ARM processors are not targeted.
@@ -19,14 +20,18 @@ unsigned builds. Older distribution releases and ARM processors are not targeted
 From the directory containing your download, install its exact filename:
 
 ```sh
-sudo apt install ./clearwave_0.6.6-1+ubuntu24.04_amd64.deb
+sudo apt install ./clearwave_0.7.0-1+ubuntu24.04_amd64.deb
 ```
 
 Substitute the Debian or Mint filename as appropriate. APT installs the declared
 GTK3, SVG, Vulkan, and PipeWire dependencies. Launch **Clearwave** from the
 application menu or run `clearwave`.
 
-In Settings, choose the folder containing your local `voice-weights.safetensors`
+In Settings, **Installer…** imports a locally obtained RTX Voice 0.5.12.6 setup
+executable in the background when 7-Zip is installed (`sudo apt install 7zip`,
+or `p7zip-full` on systems providing that package). The installer is never run;
+its validated model is saved locally and reused. **Cancel** stops the import.
+Alternatively, choose the folder containing your local `voice-weights.safetensors`
 (or `model.safetensors`) for DLL-free processing. Original encrypted model/DLL
 pairs may also be directly in the selected folder or under their original
 `NvAFX` subfolders. NVIDIA assets

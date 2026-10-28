@@ -1,6 +1,6 @@
 [package]
 name = "clearwave"
-version = "0.6.6"
+version = "0.7.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/NullMagic2/Clearwave"
@@ -17,9 +17,23 @@ serde_json = "=1.0.154"
 wgpu = { version = "=25.0.2", default-features = false, features = ["vulkan", "wgsl"] }
 pollster = "=0.4.0"
 bytemuck = "=1.25.2"
+[target.'cfg(target_os = "linux")'.dependencies]
 nix = { version = "=0.31.3", features = ["signal", "poll"] }
-
 gtk = "=0.18.2"
+
+[target.'cfg(windows)'.dependencies]
+cpal = "=0.18.1"
+windows = { version = "=0.62.2", features = [
+    "Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi",
+    "Win32_Storage_FileSystem", "Win32_Storage_Xps", "Win32_System_Com", "Win32_System_LibraryLoader",
+    "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Security",
+    "Win32_UI_Controls", "Win32_UI_HiDpi", "Win32_UI_Shell", "Win32_UI_Shell_Common",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[features]
+windows-gui = []
 
 [profile.release]
 lto = "thin"
@@ -27,4 +41,4 @@ strip = true
 codegen-units = 1
 
 [lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"

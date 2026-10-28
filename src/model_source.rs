@@ -1,14 +1,12 @@
 //! Local model discovery and DLL-free loading of the supported exported graph.
 use crate::{
     Error, Result,
-    package::{Model, Tensor, hash},
+    network::SUPPORTED_TENSOR_COUNT,
+    package::{MAX_TENSORS, Model, Tensor, hash},
+    storage::bounded_read,
 };
 use safetensors::{Dtype, SafeTensors};
-use std::{
-    fs::File,
-    io::Read,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 const MAX_MODEL_BYTES: usize = 128 * 1024 * 1024;
 const MAX_HEADER_BYTES: usize = 1024 * 1024;
@@ -24,13 +22,17 @@ pub enum ModelSource {
 impl ModelSource {
     pub fn resolve(location: &Path) -> Result<Self> {
         if location.is_file() {
+            if crate::model_import::is_installer(location) {
+                return Self::resolve(&crate::model_import::prepare(location)?);
+            }
             return if location.extension().is_some_and(|ext| ext == "safetensors") {
                 Ok(Self::Safetensors(location.to_owned()))
             } else {
-                Err(Error::new("Select a model folder or a .safetensors file"))
+                Err(Error::new(
+                    "Select a model folder, .safetensors file, or RTX Voice installer",
+                ))
             };
         }
-        // Prefer exported weights. This path never probes or reads a DLL.
         for name in ["voice-weights.safetensors", "model.safetensors"] {
             let path = location.join(name);
             if path.is_file() {
@@ -64,15 +66,9 @@ impl ModelSource {
                 decoder_data,
             } => Model::load(weights, decoder_data),
             Self::Safetensors(path) => {
-                let mut bytes = Vec::new();
-                File::open(path)?
-                    .take((MAX_MODEL_BYTES + 1) as u64)
-                    .read_to_end(&mut bytes)?;
-                if bytes.len() > MAX_MODEL_BYTES {
-                    return Err(Error::new("Model exceeds the 128 MiB size limit"));
-                }
+                let bytes = bounded_read(path, MAX_MODEL_BYTES)?;
                 let (tensors, payload_offset) = decode_safetensors(&bytes)?;
-                if tensors.len() != 32 {
+                if tensors.len() != SUPPORTED_TENSOR_COUNT {
                     return Err(Error::new(
                         "The supported denoising graph requires exactly 32 tensors",
                     ));
@@ -107,7 +103,7 @@ fn decode_safetensors(bytes: &[u8]) -> Result<(Vec<Tensor>, usize)> {
     }
     let safe = SafeTensors::deserialize(bytes)
         .map_err(|e| Error::new(format!("Invalid Safetensors model: {e}")))?;
-    if safe.is_empty() || safe.len() > 4096 {
+    if safe.is_empty() || safe.len() > MAX_TENSORS {
         return Err(Error::new("Invalid tensor count"));
     }
     let mut tensors = Vec::new();
@@ -115,23 +111,7 @@ fn decode_safetensors(bytes: &[u8]) -> Result<(Vec<Tensor>, usize)> {
         if view.dtype() != Dtype::F32 {
             return Err(Error::new(format!("Tensor {name} must contain F32 values")));
         }
-        if name.is_empty()
-            || name.len() > 256
-            || !name.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_')
-        {
-            return Err(Error::new("Invalid tensor name"));
-        }
-        let values: Vec<_> = view
-            .data()
-            .chunks_exact(4)
-            .map(|v| f32::from_le_bytes([v[0], v[1], v[2], v[3]]))
-            .collect();
-        if values.is_empty() || values.iter().any(|v| !v.is_finite()) {
-            return Err(Error::new(format!(
-                "Tensor {name} is empty or contains non-finite values"
-            )));
-        }
-        tensors.push(Tensor { name, values });
+        tensors.push(Tensor::decode(name, view.data())?);
     }
     tensors.sort_by(|a, b| a.name.cmp(&b.name));
     Ok((tensors, 8 + size as usize))
@@ -256,7 +236,6 @@ mod tests {
             .0;
         assert_eq!(decoded[0].name, "w");
         assert_eq!(decoded[0].values, model.tensors[0].values);
-        // A valid container for an unrelated network must not be accepted as this model.
         assert!(ModelSource::Safetensors(path).load().is_err());
     }
 }

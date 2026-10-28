@@ -5,6 +5,9 @@
   "layers": [
     {
       "name": "conv2d_out1_1",
+      "sources": [
+        "feature_context"
+      ],
       "input": [
         1,
         7,
@@ -15,10 +18,30 @@
         5,
         320
       ],
-      "operation": "3x5 cross-correlation, frequency padding 2, ReLU, batch normalization epsilon 0.001"
+      "operation": "3x5 cross-correlation, stride 1, time padding 0, frequency padding 2, bias, ReLU"
+    },
+    {
+      "name": "batch_normalization_1",
+      "sources": [
+        "conv2d_out1_1"
+      ],
+      "input": [
+        16,
+        5,
+        320
+      ],
+      "output": [
+        16,
+        5,
+        320
+      ],
+      "operation": "per-channel inference normalization, gamma/beta/mean/variance, epsilon 0.001; no following ReLU"
     },
     {
       "name": "conv2d_out2_1",
+      "sources": [
+        "batch_normalization_1"
+      ],
       "input": [
         16,
         5,
@@ -29,10 +52,30 @@
         3,
         320
       ],
-      "operation": "3x5 cross-correlation, frequency padding 2, ReLU, batch normalization epsilon 0.001"
+      "operation": "3x5 cross-correlation, stride 1, time padding 0, frequency padding 2, bias, ReLU"
+    },
+    {
+      "name": "batch_normalization_2",
+      "sources": [
+        "conv2d_out2_1"
+      ],
+      "input": [
+        24,
+        3,
+        320
+      ],
+      "output": [
+        24,
+        3,
+        320
+      ],
+      "operation": "per-channel inference normalization, gamma/beta/mean/variance, epsilon 0.001; no following ReLU"
     },
     {
       "name": "conv2d_out3_1",
+      "sources": [
+        "batch_normalization_2"
+      ],
       "input": [
         24,
         3,
@@ -43,50 +86,126 @@
         1,
         320
       ],
-      "operation": "3x5 cross-correlation, frequency padding 2, ReLU, batch normalization epsilon 0.001"
+      "operation": "3x5 cross-correlation, stride 1, time padding 0, frequency padding 2, bias, ReLU"
+    },
+    {
+      "name": "batch_normalization_3",
+      "sources": [
+        "conv2d_out3_1"
+      ],
+      "input": [
+        32,
+        1,
+        320
+      ],
+      "output": [
+        32,
+        1,
+        320
+      ],
+      "operation": "per-channel inference normalization, gamma/beta/mean/variance, epsilon 0.001; no following ReLU"
+    },
+    {
+      "name": "convolution_features",
+      "sources": [
+        "batch_normalization_3"
+      ],
+      "input": [
+        32,
+        1,
+        320
+      ],
+      "output": [
+        10240
+      ],
+      "operation": "permute channel/time/frequency to time/frequency/channel, then flatten"
+    },
+    {
+      "name": "center_frame",
+      "sources": [
+        "feature_context"
+      ],
+      "input": [
+        7,
+        320
+      ],
+      "output": [
+        320
+      ],
+      "operation": "select context index 3, aligned with the center of the convolution receptive field"
     },
     {
       "name": "noise_gru_1",
+      "sources": [
+        "center_frame"
+      ],
       "input": [
         320
       ],
       "output": [
         256
       ],
-      "operation": "stateful reset-after GRU, reset/update/new gates, separate input/recurrent bias"
+      "operation": "stateful reset-after GRU, reset/update/new gates, separate input/recurrent bias, zero initial hidden"
+    },
+    {
+      "name": "combined_features",
+      "sources": [
+        "noise_gru_1",
+        "convolution_features"
+      ],
+      "input": [
+        256,
+        10240
+      ],
+      "output": [
+        10496
+      ],
+      "operation": "concatenate noise hidden output first, then frequency-major convolution features"
     },
     {
       "name": "noise_denoise_gru_1_1",
+      "sources": [
+        "combined_features"
+      ],
       "input": [
         10496
       ],
       "output": [
         256
       ],
-      "operation": "stateful reset-after GRU, reset/update/new gates, separate input/recurrent bias"
+      "operation": "stateful reset-after GRU, reset/update/new gates, separate input/recurrent bias, zero initial hidden"
     },
     {
       "name": "noise_denoise_gru_2_1",
+      "sources": [
+        "noise_denoise_gru_1_1"
+      ],
       "input": [
         256
       ],
       "output": [
         512
       ],
-      "operation": "stateful reset-after GRU, reset/update/new gates, separate input/recurrent bias"
+      "operation": "stateful reset-after GRU, reset/update/new gates, separate input/recurrent bias, zero initial hidden"
     },
     {
       "name": "noise_denoise_gru_3_1",
+      "sources": [
+        "noise_denoise_gru_2_1"
+      ],
       "input": [
         512
       ],
       "output": [
         1024
       ],
-      "operation": "stateful reset-after GRU, reset/update/new gates, separate input/recurrent bias"
+      "operation": "stateful reset-after GRU, reset/update/new gates, separate input/recurrent bias, zero initial hidden"
     },
     {
       "name": "noise_denoise_filter_1",
+      "sources": [
+        "noise_denoise_gru_3_1"
+      ],
       "input": [
         1024
       ],
@@ -94,6 +213,266 @@
         961
       ],
       "operation": "input-major stored projection, transposed once for matvec, dense + sigmoid"
+    }
+  ],
+  "tensors": [
+    {
+      "name": "conv2d_out1_1_weights",
+      "stored_shape": [
+        16,
+        1,
+        3,
+        5
+      ],
+      "layout": "output, input, time, frequency"
+    },
+    {
+      "name": "conv2d_out1_1_bias",
+      "stored_shape": [
+        16
+      ],
+      "layout": "output channel"
+    },
+    {
+      "name": "batch_normalization_1_gamma",
+      "stored_shape": [
+        16
+      ],
+      "layout": "channel"
+    },
+    {
+      "name": "batch_normalization_1_beta",
+      "stored_shape": [
+        16
+      ],
+      "layout": "channel"
+    },
+    {
+      "name": "batch_normalization_1_mean",
+      "stored_shape": [
+        16
+      ],
+      "layout": "channel"
+    },
+    {
+      "name": "batch_normalization_1_var",
+      "stored_shape": [
+        16
+      ],
+      "layout": "channel"
+    },
+    {
+      "name": "conv2d_out2_1_weights",
+      "stored_shape": [
+        24,
+        16,
+        3,
+        5
+      ],
+      "layout": "output, input, time, frequency"
+    },
+    {
+      "name": "conv2d_out2_1_bias",
+      "stored_shape": [
+        24
+      ],
+      "layout": "output channel"
+    },
+    {
+      "name": "batch_normalization_2_gamma",
+      "stored_shape": [
+        24
+      ],
+      "layout": "channel"
+    },
+    {
+      "name": "batch_normalization_2_beta",
+      "stored_shape": [
+        24
+      ],
+      "layout": "channel"
+    },
+    {
+      "name": "batch_normalization_2_mean",
+      "stored_shape": [
+        24
+      ],
+      "layout": "channel"
+    },
+    {
+      "name": "batch_normalization_2_var",
+      "stored_shape": [
+        24
+      ],
+      "layout": "channel"
+    },
+    {
+      "name": "conv2d_out3_1_weights",
+      "stored_shape": [
+        32,
+        24,
+        3,
+        5
+      ],
+      "layout": "output, input, time, frequency"
+    },
+    {
+      "name": "conv2d_out3_1_bias",
+      "stored_shape": [
+        32
+      ],
+      "layout": "output channel"
+    },
+    {
+      "name": "batch_normalization_3_gamma",
+      "stored_shape": [
+        32
+      ],
+      "layout": "channel"
+    },
+    {
+      "name": "batch_normalization_3_beta",
+      "stored_shape": [
+        32
+      ],
+      "layout": "channel"
+    },
+    {
+      "name": "batch_normalization_3_mean",
+      "stored_shape": [
+        32
+      ],
+      "layout": "channel"
+    },
+    {
+      "name": "batch_normalization_3_var",
+      "stored_shape": [
+        32
+      ],
+      "layout": "channel"
+    },
+    {
+      "name": "noise_gru_1_weights",
+      "stored_shape": [
+        3,
+        256,
+        320
+      ],
+      "layout": "reset/update/new, output, input"
+    },
+    {
+      "name": "noise_gru_1_rweights",
+      "stored_shape": [
+        3,
+        256,
+        256
+      ],
+      "layout": "reset/update/new, output, previous hidden"
+    },
+    {
+      "name": "noise_gru_1_bias",
+      "stored_shape": [
+        2,
+        3,
+        256
+      ],
+      "layout": "input/recurrent, reset/update/new, hidden"
+    },
+    {
+      "name": "noise_denoise_gru_1_1_weights",
+      "stored_shape": [
+        3,
+        256,
+        10496
+      ],
+      "layout": "reset/update/new, output, input"
+    },
+    {
+      "name": "noise_denoise_gru_1_1_rweights",
+      "stored_shape": [
+        3,
+        256,
+        256
+      ],
+      "layout": "reset/update/new, output, previous hidden"
+    },
+    {
+      "name": "noise_denoise_gru_1_1_bias",
+      "stored_shape": [
+        2,
+        3,
+        256
+      ],
+      "layout": "input/recurrent, reset/update/new, hidden"
+    },
+    {
+      "name": "noise_denoise_gru_2_1_weights",
+      "stored_shape": [
+        3,
+        512,
+        256
+      ],
+      "layout": "reset/update/new, output, input"
+    },
+    {
+      "name": "noise_denoise_gru_2_1_rweights",
+      "stored_shape": [
+        3,
+        512,
+        512
+      ],
+      "layout": "reset/update/new, output, previous hidden"
+    },
+    {
+      "name": "noise_denoise_gru_2_1_bias",
+      "stored_shape": [
+        2,
+        3,
+        512
+      ],
+      "layout": "input/recurrent, reset/update/new, hidden"
+    },
+    {
+      "name": "noise_denoise_gru_3_1_weights",
+      "stored_shape": [
+        3,
+        1024,
+        512
+      ],
+      "layout": "reset/update/new, output, input"
+    },
+    {
+      "name": "noise_denoise_gru_3_1_rweights",
+      "stored_shape": [
+        3,
+        1024,
+        1024
+      ],
+      "layout": "reset/update/new, output, previous hidden"
+    },
+    {
+      "name": "noise_denoise_gru_3_1_bias",
+      "stored_shape": [
+        2,
+        3,
+        1024
+      ],
+      "layout": "input/recurrent, reset/update/new, hidden"
+    },
+    {
+      "name": "noise_denoise_filter_1_weights",
+      "stored_shape": [
+        1024,
+        961
+      ],
+      "layout": "input neuron, output frequency; transpose once for execution"
+    },
+    {
+      "name": "noise_denoise_filter_1_bias",
+      "stored_shape": [
+        961
+      ],
+      "layout": "output frequency"
     }
   ],
   "layout": "Convolutions NCHW/OIHW; recurrent input is center frame; concatenate recurrent output then frequency-major convolution features",

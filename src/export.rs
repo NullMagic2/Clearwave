@@ -7,6 +7,8 @@ use std::{
     path::Path,
 };
 
+const HEADER_ALIGNMENT: usize = 8;
+
 pub fn safetensors(model: &Model, path: &Path) -> Result<()> {
     let mut header = serde_json::Map::new();
     header.insert(
@@ -20,7 +22,7 @@ pub fn safetensors(model: &Model, path: &Path) -> Result<()> {
     );
     let mut offset = 0usize;
     for t in &model.tensors {
-        let end = offset + t.values.len() * 4;
+        let end = offset + std::mem::size_of_val(t.values.as_slice());
         header.insert(
             t.name.clone(),
             json!({"dtype":"F32","shape":[t.values.len()],"data_offsets":[offset,end]}),
@@ -28,10 +30,9 @@ pub fn safetensors(model: &Model, path: &Path) -> Result<()> {
         offset = end;
     }
     let mut header = serde_json::to_vec(&header)?;
-    while header.len() % 8 != 0 {
+    while !header.len().is_multiple_of(HEADER_ALIGNMENT) {
         header.push(b' ');
     }
-    // Refuse to overwrite an existing user file.
     let mut out = BufWriter::new(OpenOptions::new().write(true).create_new(true).open(path)?);
     out.write_all(&(header.len() as u64).to_le_bytes())?;
     out.write_all(&header)?;

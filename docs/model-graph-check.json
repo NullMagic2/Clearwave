@@ -1,0 +1,188 @@
+{
+  "adapter": "AMD Radeon RX 7900 XTX (RADV NAVI31)",
+  "execution_mode": "resident Vulkan graph",
+  "checks": [
+    {
+      "name": "asymmetric_concatenation_layout",
+      "values": 8,
+      "max_scaled_error": 0.0,
+      "passed": true
+    },
+    {
+      "name": "relu_before_normalization_preserves_negative_normalized_values",
+      "values": 2,
+      "max_scaled_error": 0.0,
+      "passed": true
+    },
+    {
+      "name": "convolution_1",
+      "values": 25600,
+      "max_scaled_error": 3.859641412552593e-8,
+      "passed": true
+    },
+    {
+      "name": "batch_normalization_1",
+      "values": 25600,
+      "max_scaled_error": 3.9361039647863546e-8,
+      "passed": true
+    },
+    {
+      "name": "convolution_2",
+      "values": 23040,
+      "max_scaled_error": 2.900288543906656e-7,
+      "passed": true
+    },
+    {
+      "name": "batch_normalization_2",
+      "values": 23040,
+      "max_scaled_error": 7.921737668013125e-8,
+      "passed": true
+    },
+    {
+      "name": "convolution_3",
+      "values": 10240,
+      "max_scaled_error": 6.872854932883626e-7,
+      "passed": true
+    },
+    {
+      "name": "batch_normalization_3",
+      "values": 10240,
+      "max_scaled_error": 3.6343277652439708e-9,
+      "passed": true
+    },
+    {
+      "name": "activation_0",
+      "values": 7,
+      "max_scaled_error": 0.0,
+      "passed": true
+    },
+    {
+      "name": "activation_1",
+      "values": 7,
+      "max_scaled_error": 4.1359030627651384e-25,
+      "passed": true
+    },
+    {
+      "name": "activation_2",
+      "values": 7,
+      "max_scaled_error": 0.0,
+      "passed": true
+    },
+    {
+      "name": "noise_gru_1_update_0",
+      "values": 256,
+      "max_scaled_error": 4.925460967427274e-8,
+      "passed": true
+    },
+    {
+      "name": "noise_gru_1_update_1",
+      "values": 256,
+      "max_scaled_error": 8.638891823158642e-8,
+      "passed": true
+    },
+    {
+      "name": "noise_gru_1_update_2",
+      "values": 256,
+      "max_scaled_error": 2.7476193732773628e-8,
+      "passed": true
+    },
+    {
+      "name": "noise_denoise_gru_1_1_update_0",
+      "values": 256,
+      "max_scaled_error": 3.6233051129799075e-8,
+      "passed": true
+    },
+    {
+      "name": "noise_denoise_gru_1_1_update_1",
+      "values": 256,
+      "max_scaled_error": 4.198922350777595e-8,
+      "passed": true
+    },
+    {
+      "name": "noise_denoise_gru_1_1_update_2",
+      "values": 256,
+      "max_scaled_error": 6.943367579565206e-8,
+      "passed": true
+    },
+    {
+      "name": "noise_denoise_gru_2_1_update_0",
+      "values": 512,
+      "max_scaled_error": 3.724639442176146e-8,
+      "passed": true
+    },
+    {
+      "name": "noise_denoise_gru_2_1_update_1",
+      "values": 512,
+      "max_scaled_error": 3.592709869901951e-8,
+      "passed": true
+    },
+    {
+      "name": "noise_denoise_gru_2_1_update_2",
+      "values": 512,
+      "max_scaled_error": 3.8764903150864306e-8,
+      "passed": true
+    },
+    {
+      "name": "noise_denoise_gru_3_1_update_0",
+      "values": 1024,
+      "max_scaled_error": 6.044994002640551e-8,
+      "passed": true
+    },
+    {
+      "name": "noise_denoise_gru_3_1_update_1",
+      "values": 1024,
+      "max_scaled_error": 7.843150480606692e-8,
+      "passed": true
+    },
+    {
+      "name": "noise_denoise_gru_3_1_update_2",
+      "values": 1024,
+      "max_scaled_error": 7.904686241858025e-8,
+      "passed": true
+    },
+    {
+      "name": "feature_graph_frame_0",
+      "values": 961,
+      "max_scaled_error": 2.1655909494660556e-7,
+      "passed": true
+    },
+    {
+      "name": "feature_graph_frame_1",
+      "values": 961,
+      "max_scaled_error": 3.352154704286111e-7,
+      "passed": true
+    },
+    {
+      "name": "feature_graph_frame_2",
+      "values": 961,
+      "max_scaled_error": 2.6279672789166135e-7,
+      "passed": true
+    },
+    {
+      "name": "state_reset",
+      "values": 961,
+      "max_scaled_error": 4.1639195838109383e-7,
+      "passed": true
+    },
+    {
+      "name": "state_changes_across_frames",
+      "values": 961,
+      "max_scaled_error": 0.0,
+      "passed": true
+    },
+    {
+      "name": "invalid_context_retains_state",
+      "values": 2,
+      "max_scaled_error": 0.0,
+      "passed": true
+    },
+    {
+      "name": "state_after_rejected_context",
+      "values": 961,
+      "max_scaled_error": 2.560637578271889e-7,
+      "passed": true
+    }
+  ],
+  "passed": true,
+  "scope": "CPU/AMD agreement for operators and feature graph; vendor audio-output parity is pending"
+}

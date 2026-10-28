@@ -1,11 +1,15 @@
 # Architecture
 
-This is a native Linux Rust 2024 model-loading and AMD-compute prototype.
+This is a native Linux and Windows Rust 2024 model-loading and AMD-compute application.
 The current binary loads the supplied NVIDIA RTX Voice 0.5.12.6 model package,
 exports named tensors, and processes WAV recordings through a connected network
 on AMD Vulkan hardware. Its waveform adapter runs on the CPU. Vendor audio-output
 parity, speech quality, and device latency remain unverified. A live PipeWire
 controller connects the streaming adapter to a temporary virtual microphone.
+Windows uses native windows-rs controls and WASAPI endpoints; it sends processed
+audio to an explicitly selected render endpoint instead of using PipeWire. A
+Windows virtual audio cable must be installed separately to provide a recording
+endpoint for other applications.
 
 ## Components
 
@@ -28,6 +32,10 @@ controller connects the streaming adapter to a temporary virtual microphone.
 | `pipewire.rs` | Source enumeration, temporary virtual microphone, stream lifecycle, latency requests | Implemented |
 | `desktop.rs` | Native GTK3 window/settings dialog, device selection, child lifecycle, a measured denoised-signal bar | Implemented |
 | `i18n.rs`, `ui/flags/` | Five UI languages and embedded country flags | Implemented |
+| `windows/desktop.rs` | Native Windows controls, DPI/fonts/flag resources, bounded worker events | Implemented; physical Windows validation pending |
+| `windows/audio.rs` | WASAPI capture/render via CPAL, bounded PCM queues, shared AMD processor | Implemented; physical Windows validation pending |
+| `windows/mod.rs` | Thread-bound COM, folder picker helper, owned Windows jobs, atomic preference replacement | Implemented |
+| `storage.rs` | Bounded file reads with limits on bytes actually read | Implemented |
 | `controls.rs` | Validated local preferences, atomic live strength updates, RMS/peak aggregation | Implemented |
 
 The final projection retains input-major order in model files. CPU setup and
@@ -68,7 +76,10 @@ all inference in both cases.
 The payload is `weights_v0`: a 10-byte signature followed by repeated little-endian
 name length, UTF-8 name, element count, and IEEE-754 F32 data. Names and dimensions
 are validated before GPU submission. The exported tensor shapes are one-dimensional
-to preserve known data without implying a completed graph specification.
+to preserve their stored order. The full execution shapes and connections are
+recorded separately in `docs/model-graph.json`, with mapping evidence in
+`docs/MODEL_GRAPH.md`. The feature graph milestone is complete; waveform feature
+alignment and vendor audio-output parity remain open.
 
 ## GPU execution contract
 
@@ -94,12 +105,14 @@ audio latency or steady-state inference benchmark.
   stages, four stateful GRUs, and a 961-output sigmoid projection. It exposes
   explicit CPU and AMD paths. See `docs/MODEL_CONTRACT.md` for layout details.
 - The audio adapter uses periodic Hamming analysis and synthesis, a sparse Slaney
-  filterbank, clipped log power, and normalized overlap addition. A seven-frame
-  deque retains spectra and features with constant frame-buffer memory. Input,
+  filterbank, clipped log power, and normalized overlap addition. A shared seven-frame
+  context queue retains spectra and features with constant frame-buffer memory.
+  It begins inference with the first feature arrival and discards three initial
+  masks for virtual spectra while preserving recurrent state. Input,
   output, and normalization samples remain in memory for offline files.
 - The waveform file path pads 1,440 samples before the first input sample and
   flushes three trailing frames. It crops the reconstruction to the original
-  sample count. Vendor startup/flush behavior and adaptive strength behavior are
+  sample count. Complete vendor startup/flush behavior and input-level conditioning are
   not claimed equivalent. Complete audio-output parity has not been established.
 - The Vulkan graph uploads all model parameters at construction and allocates
   intermediates and bind groups once. Per-step transfers are an 8,960-byte feature
@@ -130,7 +143,7 @@ audio latency or steady-state inference benchmark.
   description is the selected physical source description followed by the en-dash
   suffix ` – Clearwave`.
 
-## Desktop lifecycle
+## Linux desktop lifecycle
 
 The default command opens the GTK3 window with capture stopped. GTK widgets stay
 on the main thread. Worker threads enumerate devices and read the live child's
@@ -216,3 +229,44 @@ tensor-data buffer. The original importer retains its original hash meanings.
 Model discovery and reads happen in the live child process, keeping the GTK
 thread free of model I/O. The graph JSON remains documentation, not a required
 model asset.
+
+## Windows frontend and audio boundary
+
+GTK, nix, and PipeWire dependencies are Linux-only. On Windows, the `windows`
+module owns all native API interoperability; the shared DSP and model engine
+remain safe Rust. The common-controls manifest enables system theming and
+per-monitor DPI. Widget/GDI access and the message pump stay on one thread.
+Device discovery communicates through bounded channels. Model loading and Vulkan
+processing run in a separate owned audio process.
+
+The Windows audio process uses CPAL's WASAPI backend with explicit stable input
+and output endpoint IDs. Callbacks downmix captured channels or copy processed
+mono samples into output channels using bounded queues; model inference and
+control-file reads occur outside those callbacks. Unsupported 48 kHz formats,
+queue overflow, endpoint loss, and processing errors stop the worker explicitly.
+No fallback model or default-device routing is substituted.
+
+The folder chooser runs in a separate COM STA process. Its bounded JSON response
+fits within the redirected pipe even before the UI reaps the process. Folder
+picker and audio children belong to kill-on-close Windows jobs. Closing a job
+stops owned descendants, while a background reaper waits and removes live control
+files without blocking the UI. Model-folder validation remains outside the
+message pump. Preferences use the shared schema and atomic replacement at
+`%LOCALAPPDATA%\Clearwave\runtime\desktop.json`; the selected render endpoint
+is an optional compatible addition to that schema.
+
+Windows does not create, rename, or install a virtual audio driver. An existing
+virtual-cable playback endpoint can carry the processed stream to its paired
+recording endpoint. This distinction is exposed in the interface and documentation.
+Cross-compilation and compatibility-layer checks do not establish Windows device
+behavior, real-time deadlines, or waveform parity.
+
+## Local installer import
+
+`model_import.rs` shares allowlisted 7-Zip extraction between the CLI, model
+loader, and native chooser helpers. Helpers own the import off the UI thread;
+Windows jobs and Linux parent-death signals bound child archiver lifetimes.
+An installer content hash selects a local cache. Imports validate the supported
+graph and export weights before publishing their directory; failed imports keep
+the prior selected model. Cached models are reused, and a changed installer is
+rejected before cache publication. Vendor executables are never launched.

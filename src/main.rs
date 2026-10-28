@@ -1,26 +1,38 @@
-//! Native voice-model package tools and AMD compute prototype.
+//! Dispatch native desktop frontends, offline model tools, and streaming audio.
+//! Shared loading and processing paths serve both Linux and Windows interfaces.
+#![cfg_attr(all(windows, feature = "windows-gui"), windows_subsystem = "windows")]
 mod audio;
 mod controls;
+#[cfg(target_os = "linux")]
 mod desktop;
 mod export;
 mod fft;
+#[cfg(target_os = "linux")]
 mod folder_picker;
 mod gpu;
 mod i18n;
+mod model_import;
 mod model_source;
 mod network;
 mod operators;
 mod package;
 mod pe;
+#[cfg(target_os = "linux")]
 mod pipewire;
 mod resident;
+mod storage;
 mod wav;
+#[cfg(windows)]
+#[allow(unsafe_code)]
+mod windows;
+#[cfg(windows)]
+use windows::desktop;
 
 use serde_json::json;
 use std::{
     fmt,
     path::{Path, PathBuf},
-    process::{Command, ExitCode},
+    process::ExitCode,
 };
 
 #[derive(Debug)]
@@ -53,11 +65,19 @@ impl From<serde_json::Error> for Error {
 }
 pub type Result<T> = std::result::Result<T, Error>;
 
-const HELP: &str = "clearwave 0.6.6 — voice processing on AMD Vulkan and PipeWire
+const F32_BYTES: usize = size_of::<f32>();
+const MAX_FEATURE_FILE_BYTES: usize = 64 * 1024 * 1024;
+const STREAM_CONTROL_INTERVAL_HOPS: usize = 10;
+
+const HELP: &str = concat!(
+    "clearwave ",
+    env!("CARGO_PKG_VERSION"),
+    " — voice processing on AMD Vulkan
 
 Commands:
   gui [BUNDLE_DIRECTORY] [--settings PREFERENCES.json]
   licenses
+  import-model INSTALLER.exe CACHE_DIRECTORY
   extract INSTALLER.exe NEW_BUNDLE_DIRECTORY
   inspect BUNDLE_DIRECTORY
   export BUNDLE_DIRECTORY NEW_OUTPUT.safetensors
@@ -92,12 +112,25 @@ WAV commands process offline; live creates a temporary PipeWire virtual micropho
 Stream commands read mono 48000 Hz little-endian F32 from stdin and write it to stdout.
 Stream EOF flushes the tail; diagnostics go to stderr.
 Live preserves system defaults; make-default-mic explicitly selects its virtual input.
-";
+On Windows, gui uses native Windows controls and WASAPI. Select a render endpoint
+for processed audio; other apps use its paired virtual-cable recording endpoint.
+PipeWire commands are Linux-only. Windows does not create a virtual audio driver.
+"
+);
 
 fn main() -> ExitCode {
-    match run(std::env::args_os().skip(1).map(PathBuf::from).collect()) {
+    let args: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
+
+    #[cfg(windows)]
+    let gui = args.is_empty() || args.first().is_some_and(|arg| arg.as_os_str() == "gui");
+
+    match run(args) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
+            #[cfg(windows)]
+            if gui {
+                windows::show_error(&e.to_string());
+            }
             eprintln!("Error: {e}");
             ExitCode::FAILURE
         }
@@ -115,8 +148,25 @@ fn run(args: Vec<PathBuf>) -> Result<()> {
             Ok(())
         }
         ("extract", 3) => extract(&args[1], &args[2]),
+        ("import-model", 3) => {
+            println!(
+                "{}",
+                model_import::prepare_in(&args[1], &args[2])?.display()
+            );
+            Ok(())
+        }
         ("gui", 1..) => desktop::launch(&args[1..]),
-        ("__pick-model-folder", 5) => folder_picker::run_helper(&args[1..]),
+        #[cfg(target_os = "linux")]
+        ("__pick-model-folder", 5..=6) => folder_picker::run_helper(&args[1..]),
+        #[cfg(windows)]
+        ("__windows-pick-model-folder", 3..=4) => windows::pick_folder(
+            &args[1],
+            &args[2],
+            args.get(3)
+                .is_some_and(|mode| mode.as_os_str() == "installer"),
+        ),
+        #[cfg(windows)]
+        ("__windows-live", 6) => windows::audio::run(&args[1..]),
         ("licenses", 1) => {
             println!(
                 "Clearwave\n\n{}\nFlag artwork: flag-icons — https://github.com/lipis/flag-icons\n\n{}",
@@ -126,10 +176,18 @@ fn run(args: Vec<PathBuf>) -> Result<()> {
             Ok(())
         }
         ("sources", 1) => {
+            #[cfg(target_os = "linux")]
             println!("{}", serde_json::to_string_pretty(&pipewire::sources()?)?);
+            #[cfg(windows)]
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&windows::audio::endpoints()?)?
+            );
             Ok(())
         }
+        #[cfg(target_os = "linux")]
         ("make-default-mic", 1) => pipewire::make_default(),
+        #[cfg(target_os = "linux")]
         ("live", 3..) => pipewire::live(
             &args[1],
             args[2]
@@ -137,6 +195,10 @@ fn run(args: Vec<PathBuf>) -> Result<()> {
                 .ok_or_else(|| Error::new("Source selector must be UTF-8"))?,
             pipewire::LiveOptions::parse(&args[3..])?,
         ),
+        #[cfg(windows)]
+        ("live" | "make-default-mic", _) => Err(Error::new(
+            "PipeWire commands are Linux-only. Use the Windows interface to select a microphone and processed-audio output.",
+        )),
         ("wav-features", 3) => wav_features(&args[1], &args[2]),
         ("audio-bypass", 3) => {
             require_new_output(&args[2])?;
@@ -162,7 +224,7 @@ fn run(args: Vec<PathBuf>) -> Result<()> {
                     "format":m.format,"tensors":m.inventory(),"runtime_required":m.runtime_sha256.is_some(),
                     "tensor_count":m.tensors.len(),"total_parameters":m.tensors.iter().map(|t|t.values.len()).sum::<usize>(),
                     "package_sha256":m.package_sha256,"runtime_sha256":m.runtime_sha256,"payload_sha256":m.payload_sha256,
-                    "waveform_processing_implemented":true,"full_denoiser_implemented":false
+                    "waveform_processing_implemented":true,"feature_graph_implemented":true,"full_denoiser_implemented":false
                 }))?
             );
             Ok(())
@@ -183,14 +245,7 @@ fn run(args: Vec<PathBuf>) -> Result<()> {
         }
         ("gpu-check", 2..=3) => {
             let m = load(&args[1])?;
-            let selector = args
-                .get(2)
-                .map(|s| {
-                    s.to_str()
-                        .ok_or_else(|| Error::new("Adapter name must be UTF-8"))
-                })
-                .transpose()?;
-            let report = gpu::check_model(&m, selector)?;
+            let report = gpu::check_model(&m, adapter_selector(args.get(2))?)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
             if report.passed {
                 Ok(())
@@ -246,6 +301,7 @@ fn require_new_output(path: &Path) -> Result<()> {
 
 fn wav_features(input: &Path, output: &Path) -> Result<()> {
     use std::io::Write;
+
     require_new_output(output)?;
     let input = wav::read(input)?;
     let mut out = std::io::BufWriter::new(
@@ -264,7 +320,7 @@ fn wav_features(input: &Path, output: &Path) -> Result<()> {
     println!(
         "{}",
         serde_json::to_string_pretty(
-            &json!({"frames":frames,"feature_bins":network::FEATURES,"sample_rate":audio::RATE,"hop_samples":audio::HOP,"first_frame_start_sample":-1440,"input_channels":input.channels,"scope":"48 kHz spectral features; zero-padded waveform boundaries"})
+            &json!({"frames":frames,"feature_bins":network::FEATURES,"sample_rate":audio::RATE,"hop_samples":audio::HOP,"first_frame_start_sample":-((audio::TRANSFORM - audio::HOP) as i64),"input_channels":input.channels,"scope":"48 kHz spectral features; zero-padded waveform boundaries"})
         )?
     );
     Ok(())
@@ -272,6 +328,7 @@ fn wav_features(input: &Path, output: &Path) -> Result<()> {
 
 fn denoise(args: &[PathBuf], cpu: bool) -> Result<()> {
     require_new_output(&args[3])?;
+
     let strength = processing_strength(args.get(4))?;
     let input = wav::read(&args[2])?;
     let model = load(&args[1])?;
@@ -280,6 +337,7 @@ fn denoise(args: &[PathBuf], cpu: bool) -> Result<()> {
     } else {
         network::Backend::amd(adapter_selector(args.get(5))?)?
     };
+
     let mut network = network::Network::new(&model, backend)?;
     let processor = audio::Processor::new()?;
     let start = std::time::Instant::now();
@@ -292,7 +350,7 @@ fn denoise(args: &[PathBuf], cpu: bool) -> Result<()> {
         "{}",
         serde_json::to_string_pretty(&json!({
             "sample_rate":audio::RATE,"samples":output.len(),"input_channels":input.channels,"output_channels":1,
-            "frames":network.steps(),"adapter":network.backend.name(),"strength":strength,
+            "frames":network.steps(),"initial_context_predictions":network.steps().min(audio::CONTEXT_RADIUS),"adapter":network.backend.name(),"strength":strength,
             "execution_mode":network.execution_mode(),"resident_parameter_bytes":network.resident_parameter_bytes(),
             "audio_seconds":output.len() as f64 / audio::RATE as f64,"elapsed_ms":elapsed*1000.0,
             "processing_seconds_per_audio_second":elapsed / (output.len() as f64 / audio::RATE as f64),
@@ -327,20 +385,24 @@ fn stream_audio(args: &[PathBuf], cpu: bool) -> Result<()> {
     } else {
         network::Backend::amd(adapter_selector(args.get(3))?)?
     };
+
     let mut network = network::Network::new(&model, backend)?;
     let mut processor = audio::StreamProcessor::new()?;
     eprintln!(
         "{}",
-        json!({"event":"stream_ready","adapter":network.backend.name(),"algorithmic_delay_samples":2880,"sample_rate":audio::RATE})
+        json!({"event":"stream_ready","adapter":network.backend.name(),"algorithmic_delay_samples":audio::ALGORITHMIC_DELAY_SAMPLES,"sample_rate":audio::RATE})
     );
+
     let mut reader = std::io::stdin().lock();
-    let mut writer = std::io::BufWriter::with_capacity(audio::HOP * 4, std::io::stdout().lock());
+    let mut writer =
+        std::io::BufWriter::with_capacity(audio::HOP * F32_BYTES, std::io::stdout().lock());
     let mut predict = |context: &[f32]| network.step(context);
-    let mut bytes = [0u8; audio::HOP * 4];
+    let mut bytes = [0u8; audio::HOP * F32_BYTES];
     let mut hops = 0usize;
     let mut input_levels = controls::Levels::default();
     let mut output_levels = controls::Levels::default();
     let start = std::time::Instant::now();
+
     loop {
         let mut used = 0;
         while used < bytes.len() {
@@ -354,14 +416,17 @@ fn stream_audio(args: &[PathBuf], cpu: bool) -> Result<()> {
         if used == 0 {
             break;
         }
-        if used % 4 != 0 {
+        if used % F32_BYTES != 0 {
             return Err(Error::new("Raw audio ended inside a float32 sample"));
         }
         let samples: Vec<_> = bytes[..used]
-            .chunks_exact(4)
-            .map(|s| f32::from_le_bytes([s[0], s[1], s[2], s[3]]))
+            .as_chunks::<F32_BYTES>()
+            .0
+            .iter()
+            .copied()
+            .map(f32::from_le_bytes)
             .collect();
-        if hops.is_multiple_of(10)
+        if hops.is_multiple_of(STREAM_CONTROL_INTERVAL_HOPS)
             && let Some(path) = &control
         {
             match controls::StrengthControl::read(path) {
@@ -382,7 +447,7 @@ fn stream_audio(args: &[PathBuf], cpu: bool) -> Result<()> {
         }
         writer.flush()?;
         hops += 1;
-        if meters && hops.is_multiple_of(10) {
+        if meters && hops.is_multiple_of(STREAM_CONTROL_INTERVAL_HOPS) {
             let (input_rms, input_peak) = input_levels.take();
             let (output_rms, output_peak) = output_levels.take();
             eprintln!(
@@ -398,7 +463,7 @@ fn stream_audio(args: &[PathBuf], cpu: bool) -> Result<()> {
     eprintln!(
         "{}",
         serde_json::to_string(
-            &json!({"event":"stream_finished","samples":processor.samples(),"frames":network.steps(),"adapter":network.backend.name(),"execution_mode":network.execution_mode(),"resident_parameter_bytes":network.resident_parameter_bytes(),"algorithmic_delay_samples":2880,"sample_rate":audio::RATE,"wall_elapsed_ms":start.elapsed().as_secs_f64()*1000.0,"scope":"bounded raw float32 stream; wall time includes input/output waits; PipeWire routing is not created"})
+            &json!({"event":"stream_finished","samples":processor.samples(),"frames":network.steps(),"initial_context_predictions":network.steps().min(audio::CONTEXT_RADIUS),"adapter":network.backend.name(),"execution_mode":network.execution_mode(),"resident_parameter_bytes":network.resident_parameter_bytes(),"algorithmic_delay_samples":audio::ALGORITHMIC_DELAY_SAMPLES,"sample_rate":audio::RATE,"wall_elapsed_ms":start.elapsed().as_secs_f64()*1000.0,"scope":"bounded raw float32 stream; wall time includes input/output waits; PipeWire routing is not created"})
         )?
     );
     Ok(())
@@ -411,22 +476,23 @@ fn infer_features(
     output: &Path,
 ) -> Result<()> {
     use std::io::{BufWriter, Write};
-    if std::fs::metadata(input)?.len() > 64 * 1024 * 1024 {
-        return Err(Error::new("Feature input exceeds 64 MiB limit"));
-    }
-    let bytes = std::fs::read(input)?;
-    if bytes.is_empty() || bytes.len() % (network::FEATURES * 4) != 0 {
+    let bytes = storage::bounded_read(input, MAX_FEATURE_FILE_BYTES)?;
+    if bytes.is_empty() || bytes.len() % (network::FEATURES * F32_BYTES) != 0 {
         return Err(Error::new(
             "Input must contain complete frames of 320 little-endian F32 values",
         ));
     }
     let features: Vec<f32> = bytes
-        .chunks_exact(4)
-        .map(|x| f32::from_le_bytes([x[0], x[1], x[2], x[3]]))
+        .as_chunks::<F32_BYTES>()
+        .0
+        .iter()
+        .copied()
+        .map(f32::from_le_bytes)
         .collect();
     if features.iter().any(|x| !x.is_finite()) {
         return Err(Error::new("Feature file contains non-finite values"));
     }
+
     let frames = features.len() / network::FEATURES;
     let mut net = network::Network::new(model, backend)?;
     let mut writer = BufWriter::new(
@@ -439,7 +505,7 @@ fn infer_features(
     for frame in 0..frames {
         let mut context = [0.0; network::CONTEXT * network::FEATURES];
         for i in 0..network::CONTEXT {
-            let source = frame as isize + i as isize - 3;
+            let source = frame as isize + i as isize - (network::CONTEXT / 2) as isize;
             if (0..frames as isize).contains(&source) {
                 let source = source as usize * network::FEATURES;
                 context[i * network::FEATURES..(i + 1) * network::FEATURES]
@@ -464,28 +530,7 @@ fn load(bundle: &Path) -> Result<package::Model> {
     model_source::ModelSource::resolve(bundle)?.load()
 }
 fn extract(installer: &Path, destination: &Path) -> Result<()> {
-    let installer = installer.canonicalize()?;
-    std::fs::create_dir(destination)?;
-    let destination = destination.canonicalize()?;
-    let status = Command::new("7z")
-        .arg("x")
-        .arg("-y")
-        .arg(format!("-o{}", destination.display()))
-        .arg(installer)
-        .args([
-            "NvAFX/nv/NVAudioEffects.dll",
-            "NvAFX/models/denoiser_48k.wpkg",
-            "NvAFX/nv/EULA.pdf",
-            "NvAFX/nv/ThirdPartyLicenses.txt",
-            "EULA.txt",
-        ])
-        .status()?;
-    if !status.success() {
-        return Err(Error::new(
-            "7-Zip extraction failed; incomplete destination retained for inspection",
-        ));
-    }
-    let model = load(&destination)?;
-    println!("Bundle ready: {} tensors", model.tensors.len());
+    model_import::extract(installer, destination)?;
+    println!("Bundle ready: {} tensors", load(destination)?.tensors.len());
     Ok(())
 }

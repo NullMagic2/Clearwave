@@ -1,0 +1,197 @@
+{
+  "status": "diagnostic; rejected for default processing",
+  "binary_sha256": "60454dd2217b7e3d80fcbd5f83d84f22230554e3d3e4675532df5c8382b69952",
+  "noise_seed": 27102026,
+  "speech_rms": 0.006,
+  "seconds": 6,
+  "cases": {
+    "0-clean": {
+      "source": "198-209-0000.hq.ogg",
+      "source_sha256": "6a8d2c16e56dcb27b7f5fe5aa99bfd26b4722a6dabca1968eff951b456936514",
+      "baseline": {
+        "voice_projection_gain_db": -0.2542104597272853,
+        "si_sdr_db": 17.099080644553673,
+        "tail_rms_dbfs": -240.0,
+        "voice_bands": {
+          "80-1000_hz": {
+            "voice_projection_gain_db": -0.16450272356084597,
+            "si_sdr_db": 19.39116796700762
+          },
+          "1000-4000_hz": {
+            "voice_projection_gain_db": -0.15803654656330424,
+            "si_sdr_db": 22.86810936617071
+          },
+          "4000-8000_hz": {
+            "voice_projection_gain_db": -0.6062875558757229,
+            "si_sdr_db": 13.509908758477138
+          }
+        },
+        "maximum_input_scale": 1.0,
+        "conditioned_hops": 0
+      },
+      "conditioned": {
+        "voice_projection_gain_db": 0.0680250736700701,
+        "si_sdr_db": 14.062767063528721,
+        "tail_rms_dbfs": -240.0,
+        "voice_bands": {
+          "80-1000_hz": {
+            "voice_projection_gain_db": 0.2609244635290665,
+            "si_sdr_db": 15.94166408699275
+          },
+          "1000-4000_hz": {
+            "voice_projection_gain_db": 0.070808137898021,
+            "si_sdr_db": 16.021260397588144
+          },
+          "4000-8000_hz": {
+            "voice_projection_gain_db": -1.9555872211405003,
+            "si_sdr_db": 8.06957670362483
+          }
+        },
+        "maximum_input_scale": 271.726806640625,
+        "conditioned_hops": 689
+      }
+    },
+    "0-noisy": {
+      "source": "198-209-0000.hq.ogg",
+      "source_sha256": "6a8d2c16e56dcb27b7f5fe5aa99bfd26b4722a6dabca1968eff951b456936514",
+      "baseline": {
+        "voice_projection_gain_db": -0.487164123275309,
+        "si_sdr_db": 14.337411078872684,
+        "tail_rms_dbfs": -67.90502166748047,
+        "voice_bands": {
+          "80-1000_hz": {
+            "voice_projection_gain_db": -0.31624310373930603,
+            "si_sdr_db": 18.569798289791276
+          },
+          "1000-4000_hz": {
+            "voice_projection_gain_db": -0.4314594614698708,
+            "si_sdr_db": 17.566549387834232
+          },
+          "4000-8000_hz": {
+            "voice_projection_gain_db": -2.3873720908618115,
+            "si_sdr_db": 6.627931799792105
+          }
+        },
+        "maximum_input_scale": 1.0,
+        "conditioned_hops": 0
+      },
+      "conditioned": {
+        "voice_projection_gain_db": -0.12388710746804753,
+        "si_sdr_db": 14.112651832128654,
+        "tail_rms_dbfs": -77.74250030517578,
+        "voice_bands": {
+          "80-1000_hz": {
+            "voice_projection_gain_db": 0.08379772310632949,
+            "si_sdr_db": 16.405289826034032
+          },
+          "1000-4000_hz": {
+            "voice_projection_gain_db": -0.14076681278718292,
+            "si_sdr_db": 15.349004134123621
+          },
+          "4000-8000_hz": {
+            "voice_projection_gain_db": -3.015445157155047,
+            "si_sdr_db": 6.630860397459866
+          }
+        },
+        "maximum_input_scale": 46.70139694213867,
+        "conditioned_hops": 687
+      }
+    },
+    "1-clean": {
+      "source": "5703-47212-0000.hq.ogg",
+      "source_sha256": "f09254a0daf4b14b292868d46dc2e3c8e158d19fafff739ad4c3931e2ce7b1b0",
+      "baseline": {
+        "voice_projection_gain_db": -0.06474417579635222,
+        "si_sdr_db": 22.85048515293443,
+        "tail_rms_dbfs": -240.0,
+        "voice_bands": {
+          "80-1000_hz": {
+            "voice_projection_gain_db": -0.009464367936203161,
+            "si_sdr_db": 42.474142183778426
+          },
+          "1000-4000_hz": {
+            "voice_projection_gain_db": -0.021549880215896412,
+            "si_sdr_db": 30.478030768873104
+          },
+          "4000-8000_hz": {
+            "voice_projection_gain_db": -0.31734633008327173,
+            "si_sdr_db": 15.510995456789239
+          }
+        },
+        "maximum_input_scale": 1.0,
+        "conditioned_hops": 0
+      },
+      "conditioned": {
+        "voice_projection_gain_db": -0.4724424016561616,
+        "si_sdr_db": 13.854700028407951,
+        "tail_rms_dbfs": -240.0,
+        "voice_bands": {
+          "80-1000_hz": {
+            "voice_projection_gain_db": -0.3750530039608735,
+            "si_sdr_db": 14.838634290852386
+          },
+          "1000-4000_hz": {
+            "voice_projection_gain_db": -0.16780534054350427,
+            "si_sdr_db": 18.379210849467142
+          },
+          "4000-8000_hz": {
+            "voice_projection_gain_db": -0.20309425377983292,
+            "si_sdr_db": 18.900241342619037
+          }
+        },
+        "maximum_input_scale": 7.710727691650391,
+        "conditioned_hops": 660
+      }
+    },
+    "1-noisy": {
+      "source": "5703-47212-0000.hq.ogg",
+      "source_sha256": "f09254a0daf4b14b292868d46dc2e3c8e158d19fafff739ad4c3931e2ce7b1b0",
+      "baseline": {
+        "voice_projection_gain_db": -0.41864647235715563,
+        "si_sdr_db": 15.808989570193184,
+        "tail_rms_dbfs": -60.18396759033203,
+        "voice_bands": {
+          "80-1000_hz": {
+            "voice_projection_gain_db": -0.35631033417233277,
+            "si_sdr_db": 22.823873607824986
+          },
+          "1000-4000_hz": {
+            "voice_projection_gain_db": -1.0471859397615741,
+            "si_sdr_db": 11.83959269002427
+          },
+          "4000-8000_hz": {
+            "voice_projection_gain_db": -5.731395938264966,
+            "si_sdr_db": -1.2888155073003524
+          }
+        },
+        "maximum_input_scale": 1.0,
+        "conditioned_hops": 0
+      },
+      "conditioned": {
+        "voice_projection_gain_db": -0.4053838497503749,
+        "si_sdr_db": 15.660378904689667,
+        "tail_rms_dbfs": -80.77999877929688,
+        "voice_bands": {
+          "80-1000_hz": {
+            "voice_projection_gain_db": -0.3227666621110153,
+            "si_sdr_db": 20.77515945934094
+          },
+          "1000-4000_hz": {
+            "voice_projection_gain_db": -1.0942660311183423,
+            "si_sdr_db": 11.945392354796416
+          },
+          "4000-8000_hz": {
+            "voice_projection_gain_db": -8.857159536100523,
+            "si_sdr_db": -0.7237700745652387
+          }
+        },
+        "maximum_input_scale": 44.15243911743164,
+        "conditioned_hops": 687
+      }
+    }
+  },
+  "scope": "Static-contract prototype around the current raw stream. EOF tail uses the final gain, outside scored active speech. No vendor execution, waveform equivalence or listening validation.",
+  "adapter": "AMD Radeon RX 7900 XTX (RADV NAVI31)",
+  "backend": "Vulkan",
+  "float_precision": "F32 streaming samples; reference measurements use benchmark_speech.py"
+}

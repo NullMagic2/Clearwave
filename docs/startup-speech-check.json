@@ -1,0 +1,252 @@
+{
+  "noise_seed": 27102026,
+  "speech_rms": 0.006,
+  "lead_in_seconds": 0.0,
+  "cases": {
+    "0-clean": {
+      "source": "5703-47212-0000.hq.ogg",
+      "source_sha256": "f09254a0daf4b14b292868d46dc2e3c8e158d19fafff739ad4c3931e2ce7b1b0",
+      "input": {
+        "voice_projection_gain_db": 0.0,
+        "si_sdr_db": 195.56302500767288,
+        "tail_rms_dbfs": -240.0,
+        "voice_bands": {
+          "80-1000_hz": {
+            "voice_projection_gain_db": 0.0,
+            "si_sdr_db": 301.1502289514903
+          },
+          "1000-4000_hz": {
+            "voice_projection_gain_db": 0.0,
+            "si_sdr_db": 288.2624429050412
+          },
+          "4000-8000_hz": {
+            "voice_projection_gain_db": 0.0,
+            "si_sdr_db": 271.83196045398114
+          }
+        }
+      },
+      "candidate": {
+        "voice_projection_gain_db": -0.06474417579634154,
+        "si_sdr_db": 22.85048515293444,
+        "tail_rms_dbfs": -240.0,
+        "voice_bands": {
+          "80-1000_hz": {
+            "voice_projection_gain_db": -0.009464364553477248,
+            "si_sdr_db": 42.47414272752658
+          },
+          "1000-4000_hz": {
+            "voice_projection_gain_db": -0.021549881789540603,
+            "si_sdr_db": 30.47803080377037
+          },
+          "4000-8000_hz": {
+            "voice_projection_gain_db": -0.317346330718396,
+            "si_sdr_db": 15.510995446050726
+          }
+        }
+      },
+      "baseline": {
+        "voice_projection_gain_db": -0.06542954749910669,
+        "si_sdr_db": 22.82255165425368,
+        "tail_rms_dbfs": -240.0,
+        "voice_bands": {
+          "80-1000_hz": {
+            "voice_projection_gain_db": -0.009758323443111543,
+            "si_sdr_db": 42.245931967144415
+          },
+          "1000-4000_hz": {
+            "voice_projection_gain_db": -0.02236265326357191,
+            "si_sdr_db": 30.245238419327414
+          },
+          "4000-8000_hz": {
+            "voice_projection_gain_db": -0.3206257696202476,
+            "si_sdr_db": 15.479867242520914
+          }
+        }
+      }
+    },
+    "0-snr10-click-hum-static": {
+      "source": "5703-47212-0000.hq.ogg",
+      "source_sha256": "f09254a0daf4b14b292868d46dc2e3c8e158d19fafff739ad4c3931e2ce7b1b0",
+      "input": {
+        "voice_projection_gain_db": 0.012071709699745341,
+        "si_sdr_db": 10.012155713922706,
+        "tail_rms_dbfs": -54.39763859669792,
+        "voice_bands": {
+          "80-1000_hz": {
+            "voice_projection_gain_db": -0.0006456851248740136,
+            "si_sdr_db": 21.504472319489558
+          },
+          "1000-4000_hz": {
+            "voice_projection_gain_db": 0.005972225585288638,
+            "si_sdr_db": 6.906907332792546
+          },
+          "4000-8000_hz": {
+            "voice_projection_gain_db": 0.04920526500792606,
+            "si_sdr_db": -10.741205225045348
+          }
+        }
+      },
+      "candidate": {
+        "voice_projection_gain_db": -0.4186464723571495,
+        "si_sdr_db": 15.80898957019319,
+        "tail_rms_dbfs": -60.18396429613216,
+        "voice_bands": {
+          "80-1000_hz": {
+            "voice_projection_gain_db": -0.3563103324433731,
+            "si_sdr_db": 22.823873623968247
+          },
+          "1000-4000_hz": {
+            "voice_projection_gain_db": -1.0471859364770666,
+            "si_sdr_db": 11.8395926862032
+          },
+          "4000-8000_hz": {
+            "voice_projection_gain_db": -5.731395933531669,
+            "si_sdr_db": -1.2888155063543782
+          }
+        }
+      },
+      "baseline": {
+        "voice_projection_gain_db": -0.36245672286310765,
+        "si_sdr_db": 15.41278485116677,
+        "tail_rms_dbfs": -59.91166472475065,
+        "voice_bands": {
+          "80-1000_hz": {
+            "voice_projection_gain_db": -0.3063712271679798,
+            "si_sdr_db": 22.940421517721653
+          },
+          "1000-4000_hz": {
+            "voice_projection_gain_db": -1.005351795413489,
+            "si_sdr_db": 11.87957776993514
+          },
+          "4000-8000_hz": {
+            "voice_projection_gain_db": -5.720349848745576,
+            "si_sdr_db": -1.300635126656343
+          }
+        }
+      }
+    },
+    "1-clean": {
+      "source": "198-209-0000.hq.ogg",
+      "source_sha256": "6a8d2c16e56dcb27b7f5fe5aa99bfd26b4722a6dabca1968eff951b456936514",
+      "input": {
+        "voice_projection_gain_db": 0.0,
+        "si_sdr_db": 195.56302500767288,
+        "tail_rms_dbfs": -240.0,
+        "voice_bands": {
+          "80-1000_hz": {
+            "voice_projection_gain_db": 0.0,
+            "si_sdr_db": 300.16762386470225
+          },
+          "1000-4000_hz": {
+            "voice_projection_gain_db": 0.0,
+            "si_sdr_db": 296.00726793680104
+          },
+          "4000-8000_hz": {
+            "voice_projection_gain_db": 0.0,
+            "si_sdr_db": 285.8772910817301
+          }
+        }
+      },
+      "candidate": {
+        "voice_projection_gain_db": -0.2542104597272833,
+        "si_sdr_db": 17.099080644553673,
+        "tail_rms_dbfs": -240.0,
+        "voice_bands": {
+          "80-1000_hz": {
+            "voice_projection_gain_db": -0.1645027252297942,
+            "si_sdr_db": 19.39116798758451
+          },
+          "1000-4000_hz": {
+            "voice_projection_gain_db": -0.15803654946587062,
+            "si_sdr_db": 22.86810937036141
+          },
+          "4000-8000_hz": {
+            "voice_projection_gain_db": -0.6062875544420688,
+            "si_sdr_db": 13.509908769092425
+          }
+        }
+      },
+      "baseline": {
+        "voice_projection_gain_db": -0.25330578857315467,
+        "si_sdr_db": 17.14024974834333,
+        "tail_rms_dbfs": -240.0,
+        "voice_bands": {
+          "80-1000_hz": {
+            "voice_projection_gain_db": -0.16179527064114588,
+            "si_sdr_db": 19.401698304326008
+          },
+          "1000-4000_hz": {
+            "voice_projection_gain_db": -0.16451640064777906,
+            "si_sdr_db": 22.98980981533112
+          },
+          "4000-8000_hz": {
+            "voice_projection_gain_db": -0.6023358897412584,
+            "si_sdr_db": 13.583451461170428
+          }
+        }
+      }
+    },
+    "1-snr10-click-hum-static": {
+      "source": "198-209-0000.hq.ogg",
+      "source_sha256": "6a8d2c16e56dcb27b7f5fe5aa99bfd26b4722a6dabca1968eff951b456936514",
+      "input": {
+        "voice_projection_gain_db": -0.02999182413313175,
+        "si_sdr_db": 9.970524221492811,
+        "tail_rms_dbfs": -54.39763859669792,
+        "voice_bands": {
+          "80-1000_hz": {
+            "voice_projection_gain_db": 0.0008335281158729634,
+            "si_sdr_db": 20.52334756338621
+          },
+          "1000-4000_hz": {
+            "voice_projection_gain_db": -0.009511766317067146,
+            "si_sdr_db": 14.636389937494567
+          },
+          "4000-8000_hz": {
+            "voice_projection_gain_db": -0.031469986187662405,
+            "si_sdr_db": 3.223558658506595
+          }
+        }
+      },
+      "candidate": {
+        "voice_projection_gain_db": -0.4871641232753049,
+        "si_sdr_db": 14.337411078872687,
+        "tail_rms_dbfs": -67.90501935425299,
+        "voice_bands": {
+          "80-1000_hz": {
+            "voice_projection_gain_db": -0.3162431010095224,
+            "si_sdr_db": 18.569798293364176
+          },
+          "1000-4000_hz": {
+            "voice_projection_gain_db": -0.43145946040523214,
+            "si_sdr_db": 17.56654939538163
+          },
+          "4000-8000_hz": {
+            "voice_projection_gain_db": -2.38737209163763,
+            "si_sdr_db": 6.627931803661134
+          }
+        }
+      },
+      "baseline": {
+        "voice_projection_gain_db": -0.4751778483679936,
+        "si_sdr_db": 14.248730107639672,
+        "tail_rms_dbfs": -66.54158493487431,
+        "voice_bands": {
+          "80-1000_hz": {
+            "voice_projection_gain_db": -0.31441054358642073,
+            "si_sdr_db": 18.609082920936423
+          },
+          "1000-4000_hz": {
+            "voice_projection_gain_db": -0.4123428629995147,
+            "si_sdr_db": 17.68860459893017
+          },
+          "4000-8000_hz": {
+            "voice_projection_gain_db": -2.2214180657491394,
+            "si_sdr_db": 7.016919645193271
+          }
+        }
+      }
+    }
+  },
+  "scope": "Local clean-reference comparison, first 6 seconds of each clip. No automatic gain is added after denoising. Not vendor equivalence. Includes a recurrent-startup correction; changes are mixed and do not establish subjective improvement."
+}

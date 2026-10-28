@@ -1,17 +1,56 @@
 //! Package v1 and weights_v0 decoding. No vendor runtime executes here.
-use crate::{Error, Result, pe};
+use crate::{Error, Result, pe, storage::bounded_read};
 use aes::Aes256;
 use cbc::cipher::{BlockDecryptMut, KeyIvInit, block_padding::Pkcs7};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use std::{collections::HashSet, fs, path::Path};
+use std::{collections::HashSet, path::Path};
 
-const MAX_BYTES: u64 = 512 * 1024 * 1024;
+const MAX_BYTES: usize = 512 * 1024 * 1024;
+pub(crate) const MAX_TENSORS: usize = 4096;
+const MAX_TENSOR_NAME_BYTES: usize = 256;
+const CIPHER_BLOCK_BYTES: usize = 16;
+const CIPHER_KEY_BYTES: usize = 32;
+const KEY_SEQUENCE_RVA: u32 = 0x194c7;
+const KEY_TABLE_RVA: u32 = 0x33800;
+const KEY_BYTE_OFFSET: u8 = 0x6d;
 
 #[derive(Debug, Serialize)]
 pub struct Tensor {
     pub name: String,
     pub values: Vec<f32>,
+}
+
+impl Tensor {
+    pub(crate) fn decode(name: String, bytes: &[u8]) -> Result<Self> {
+        if name.is_empty()
+            || name.len() > MAX_TENSOR_NAME_BYTES
+            || !name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+        {
+            return Err(Error::new("Invalid tensor name"));
+        }
+        if bytes.is_empty() || !bytes.len().is_multiple_of(std::mem::size_of::<f32>()) {
+            return Err(Error::new(format!(
+                "Tensor {name} has no complete F32 values"
+            )));
+        }
+
+        let values: Vec<f32> = bytes
+            .as_chunks::<{ std::mem::size_of::<f32>() }>()
+            .0
+            .iter()
+            .copied()
+            .map(f32::from_le_bytes)
+            .collect();
+        if values.iter().any(|value| !value.is_finite()) {
+            return Err(Error::new(format!(
+                "Tensor {name} contains non-finite values"
+            )));
+        }
+        Ok(Self { name, values })
+    }
 }
 
 #[derive(Debug)]
@@ -33,8 +72,8 @@ pub struct TensorInfo<'a> {
 
 impl Model {
     pub fn load(package: &Path, runtime: &Path) -> Result<Self> {
-        let package = read_bounded(package)?;
-        let runtime = read_bounded(runtime)?;
+        let package = bounded_read(package, MAX_BYTES)?;
+        let runtime = bounded_read(runtime, MAX_BYTES)?;
         let clear = decode_package(&package, &runtime)?;
         Ok(Self {
             format: "NVnn v1 / weights_v0",
@@ -69,13 +108,6 @@ pub fn hash(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
-fn read_bounded(path: &Path) -> Result<Vec<u8>> {
-    if fs::metadata(path)?.len() > MAX_BYTES {
-        return Err(Error::new("File exceeds 512 MiB limit"));
-    }
-    Ok(fs::read(path)?)
-}
-
 pub fn decode_package(bytes: &[u8], runtime: &[u8]) -> Result<Vec<u8>> {
     let mut r = Reader::new(bytes);
     if r.take(4)? != b"NVnn" {
@@ -96,28 +128,29 @@ pub fn decode_package(bytes: &[u8], runtime: &[u8]) -> Result<Vec<u8>> {
     if meta != b"\x10\0\0\0weig\0\0\0\0\0\0\0\0" {
         return Err(Error::new("Unsupported weights metadata"));
     }
-    let iv = r.take(16)?;
+    let iv = r.take(CIPHER_BLOCK_BYTES)?;
     if r.u32()? != 1 || r.u32()? != 0 {
         return Err(Error::new("Only single-segment packages are supported"));
     }
     let size = r.u32()? as usize;
     let encrypted = r.take(size)?;
-    if !r.is_empty() || size == 0 || !size.is_multiple_of(16) {
+    if !r.is_empty() || size == 0 || !size.is_multiple_of(CIPHER_BLOCK_BYTES) {
         return Err(Error::new("Invalid ciphertext length"));
     }
 
-    // This loader targets the supplied 0.5.12.6 runtime layout.
-    // Check its key-derivation instruction sequence before using the table RVA.
+    // Package v1 decoding is tied to the supported 0.5.12.6 runtime layout.
+    // Validate the instruction signature before interpreting the data table.
+    // Only bytes are inspected; the supplied runtime is never executed.
     let expected = [
         0x41, 0x8d, 0x50, 0x6d, 0x41, 0x0f, 0xb6, 0x04, 0x09, 0x32, 0xc2,
     ];
-    if pe::slice_at_rva(runtime, 0x194c7, expected.len())? != expected {
+    if pe::slice_at_rva(runtime, KEY_SEQUENCE_RVA, expected.len())? != expected {
         return Err(Error::new("Unsupported runtime version/layout"));
     }
-    let table = pe::slice_at_rva(runtime, 0x33800, 32)?;
-    let mut key = [0u8; 32];
+    let table = pe::slice_at_rva(runtime, KEY_TABLE_RVA, CIPHER_KEY_BYTES)?;
+    let mut key = [0u8; CIPHER_KEY_BYTES];
     for (i, byte) in table.iter().enumerate() {
-        key[i] = byte ^ (i as u8).wrapping_add(0x6d);
+        key[i] = byte ^ (i as u8).wrapping_add(KEY_BYTE_OFFSET);
     }
     let mut clear = encrypted.to_vec();
     let decoder = cbc::Decryptor::<Aes256>::new((&key).into(), iv.into());
@@ -141,35 +174,26 @@ pub fn parse_weights(bytes: &[u8]) -> Result<Vec<Tensor>> {
     let mut tensors = Vec::new();
     let mut names = HashSet::new();
     while !r.is_empty() {
-        if tensors.len() >= 4096 {
+        if tensors.len() >= MAX_TENSORS {
             return Err(Error::new("Too many tensors"));
         }
         let len = r.u32()? as usize;
-        if !(1..=256).contains(&len) {
+        if !(1..=MAX_TENSOR_NAME_BYTES).contains(&len) {
             return Err(Error::new("Invalid tensor name length"));
         }
         let name = std::str::from_utf8(r.take(len)?)?.to_owned();
-        if !name.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_')
-            || !names.insert(name.clone())
-        {
-            return Err(Error::new("Invalid or duplicate tensor name"));
+        if !names.insert(name.clone()) {
+            return Err(Error::new("Duplicate tensor name"));
         }
         let elements = r.u32()? as usize;
         if elements == 0 {
             return Err(Error::new("Empty tensor"));
         }
         let len = elements
-            .checked_mul(4)
+            .checked_mul(std::mem::size_of::<f32>())
             .ok_or_else(|| Error::new("Tensor size overflow"))?;
         let data = r.take(len)?;
-        let values: Vec<f32> = data
-            .chunks_exact(4)
-            .map(|v| f32::from_le_bytes([v[0], v[1], v[2], v[3]]))
-            .collect();
-        if values.iter().any(|v| !v.is_finite()) {
-            return Err(Error::new("Non-finite tensor values"));
-        }
-        tensors.push(Tensor { name, values });
+        tensors.push(Tensor::decode(name, data)?);
     }
     if tensors.is_empty() {
         return Err(Error::new("No tensors in payload"));

@@ -33,6 +33,7 @@ impl Language {
             Self::EnglishBritish => "English (UK)",
         }
     }
+    #[cfg(target_os = "linux")]
     pub fn flag(self) -> &'static [u8] {
         match self {
             Self::PortuguesePortugal => include_bytes!("../ui/flags/pt.svg"),
@@ -46,6 +47,7 @@ impl Language {
 macro_rules! catalog {
     ($($key:ident => [$en:literal, $pt:literal, $br:literal, $el:literal, $es:literal]),* $(,)?) => {
         #[derive(Clone, Copy)]
+        #[allow(dead_code, reason = "The shared catalog includes labels specific to each platform")]
         pub enum Text { $($key),* }
         impl Language {
             pub fn text(self, key: Text) -> &'static str {
@@ -58,6 +60,11 @@ macro_rules! catalog {
     };
 }
 catalog! {
+    WindowsOutput => ["Processed audio output", "Saída de áudio processado", "Saída de áudio processado", "Έξοδος επεξεργασμένου ήχου", "Salida de audio procesado"],
+    WindowsRouteHint => ["For other apps, choose a virtual cable’s playback endpoint here, then select its recording endpoint in those apps.", "Para outras aplicações, escolha aqui a saída de um cabo virtual e selecione a respetiva entrada nessas aplicações.", "Para outros aplicativos, escolha aqui a saída de um cabo virtual e selecione a entrada correspondente nesses aplicativos.", "Για άλλες εφαρμογές, επιλέξτε εδώ την έξοδο ενός εικονικού καλωδίου και μετά την είσοδό του στις εφαρμογές.", "Para otras aplicaciones, elija aquí la salida de un cable virtual y seleccione su entrada en esas aplicaciones."],
+    ChooseOutput => ["Choose a processed-audio output first", "Selecione primeiro uma saída de áudio processado", "Selecione primeiro uma saída de áudio processado", "Επιλέξτε πρώτα έξοδο επεξεργασμένου ήχου", "Seleccione primero una salida de audio procesado"],
+    LocalProcessing => ["Local microphone noise reduction", "Redução local de ruído do microfone", "Redução local de ruído do microfone", "Τοπική μείωση θορύβου μικροφώνου", "Reducción local de ruido del micrófono"],
+    Refresh => ["Refresh", "Atualizar", "Atualizar", "Ανανέωση", "Actualizar"],
     Title => ["Clearwave", "Clearwave", "Clearwave", "Clearwave", "Clearwave"],
     Language => ["Language", "Idioma", "Idioma", "Γλώσσα", "Idioma"],
     Settings => ["Settings", "Definições", "Configurações", "Ρυθμίσεις", "Ajustes"],
@@ -79,7 +86,10 @@ catalog! {
     Start => ["Start", "Iniciar", "Iniciar", "Έναρξη", "Iniciar"],
     Stop => ["Stop", "Parar", "Parar", "Διακοπή", "Detener"],
     Close => ["Close", "Fechar", "Fechar", "Κλείσιμο", "Cerrar"],
-    ModelFolder => ["Model folder", "Pasta do modelo", "Pasta do modelo", "Φάκελος μοντέλου", "Carpeta del modelo"],
+    ModelFolder => ["Model folder or installer", "Pasta do modelo ou instalador", "Pasta do modelo ou instalador", "Φάκελος μοντέλου ή πρόγραμμα εγκατάστασης", "Carpeta del modelo o instalador"],
+    Installer => ["Installer…", "Instalador…", "Instalador…", "Εγκατάσταση…", "Instalador…"],
+    SelectingModel => ["Selecting or importing model…", "A selecionar ou importar o modelo…", "Selecionando ou importando o modelo…", "Επιλογή ή εισαγωγή μοντέλου…", "Seleccionando o importando el modelo…"],
+    InstallerTitle => ["Select RTX Voice installer", "Selecionar instalador do RTX Voice", "Selecionar instalador do RTX Voice", "Επιλογή προγράμματος εγκατάστασης RTX Voice", "Seleccionar instalador de RTX Voice"],
     Browse => ["Browse…", "Procurar…", "Procurar…", "Αναζήτηση…", "Examinar…"],
     Device => ["AMD graphics device", "Dispositivo gráfico AMD", "Dispositivo gráfico AMD", "Συσκευή γραφικών AMD", "Dispositivo gráfico AMD"],
     Buffer => ["Audio buffer request (ms)", "Memória intermédia de áudio (ms)", "Buffer de áudio solicitado (ms)", "Προσωρινή μνήμη ήχου (ms)", "Búfer de audio solicitado (ms)"],

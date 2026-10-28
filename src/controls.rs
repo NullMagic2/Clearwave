@@ -1,12 +1,60 @@
-//! Saved current settings and bounded live control/level messages.
-use crate::{Error, Result};
+//! Shared desktop options, persisted settings, and bounded live control messages.
+//! Platform frontends share validation and storage without sharing native widgets.
+use crate::{Error, Result, storage::bounded_read};
 use serde::{Deserialize, Serialize};
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 use std::{
-    fs::{File, OpenOptions},
-    io::{Read, Write},
-    os::unix::fs::OpenOptionsExt,
+    fs::OpenOptions,
+    io::Write,
     path::{Path, PathBuf},
+    time::Duration,
 };
+
+pub const DESKTOP_EVENT_CAPACITY: usize = 64;
+pub const UI_REFRESH_INTERVAL: Duration = Duration::from_millis(100);
+pub const METER_STALE_AFTER: Duration = Duration::from_millis(600);
+pub const MAX_CHILD_EVENT_BYTES: usize = 16 * 1024;
+pub const MAX_PICKER_RESPONSE_BYTES: usize = 4095;
+pub const DEFAULT_LATENCY_MS: u16 = 10;
+pub const MIN_LATENCY_MS: u16 = 5;
+pub const MAX_LATENCY_MS: u16 = 100;
+const MAX_TEXT_BYTES: usize = 4096;
+const MAX_PREFERENCES_BYTES: usize = 256 * 1024;
+const MAX_CONTROL_BYTES: usize = 1024;
+const PREFERENCES_VERSION: u8 = 2;
+
+pub struct DesktopOptions {
+    pub settings: PathBuf,
+    pub bundle: Option<PathBuf>,
+}
+impl DesktopOptions {
+    pub fn parse(args: &[PathBuf]) -> Result<Self> {
+        let mut settings = runtime_directory()?.join("desktop.json");
+        let mut bundle = None;
+        let mut arguments = args.iter();
+
+        while let Some(argument) = arguments.next() {
+            if argument.as_os_str() == "--settings" {
+                settings = arguments
+                    .next()
+                    .ok_or_else(|| Error::new("--settings requires a file path"))?
+                    .clone();
+            } else if bundle.is_none() {
+                bundle = Some(argument.clone());
+            } else {
+                return Err(Error::new(
+                    "Usage: gui [BUNDLE_DIRECTORY] [--settings PREFERENCES.json]",
+                ));
+            }
+        }
+
+        if settings.is_relative() {
+            settings = std::env::current_dir()?.join(settings);
+        }
+        Ok(Self { settings, bundle })
+    }
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]
@@ -14,6 +62,7 @@ pub struct AudioSettings {
     pub bundle: String,
     pub source: String,
     pub adapter: String,
+    pub render: String,
     pub strength: f32,
     pub latency_ms: u16,
 }
@@ -23,18 +72,19 @@ impl Default for AudioSettings {
             bundle: String::new(),
             source: String::new(),
             adapter: String::new(),
+            render: String::new(),
             strength: 1.0,
-            latency_ms: 10,
+            latency_ms: DEFAULT_LATENCY_MS,
         }
     }
 }
 impl AudioSettings {
     pub fn validate(&self) -> Result<()> {
         crate::audio::validate_strength(self.strength)?;
-        if !(5..=100).contains(&self.latency_ms)
-            || [&self.bundle, &self.source, &self.adapter]
+        if !(MIN_LATENCY_MS..=MAX_LATENCY_MS).contains(&self.latency_ms)
+            || [&self.bundle, &self.source, &self.adapter, &self.render]
                 .iter()
-                .any(|v| v.len() > 4096 || v.contains('\0'))
+                .any(|v| v.len() > MAX_TEXT_BYTES || v.contains('\0'))
         {
             return Err(Error::new("Invalid audio settings latency or text field"));
         }
@@ -48,14 +98,13 @@ pub struct Preferences {
     #[serde(default)]
     pub language: crate::i18n::Language,
     pub active: AudioSettings,
-    // Read and discard the removed field from older saved settings.
     #[serde(default, skip_serializing, rename = "presets")]
     _legacy_presets: serde::de::IgnoredAny,
 }
 impl Default for Preferences {
     fn default() -> Self {
         Self {
-            version: 2,
+            version: PREFERENCES_VERSION,
             language: crate::i18n::Language::default(),
             active: AudioSettings::default(),
             _legacy_presets: serde::de::IgnoredAny,
@@ -64,7 +113,7 @@ impl Default for Preferences {
 }
 impl Preferences {
     pub fn validate(&self) -> Result<()> {
-        if self.version != 2 {
+        if self.version != PREFERENCES_VERSION {
             return Err(Error::new("Unsupported settings version"));
         }
         self.active.validate()
@@ -72,17 +121,18 @@ impl Preferences {
     fn decode(values: &[u8]) -> Result<Self> {
         let mut preferences: Self = serde_json::from_slice(values)?;
         if preferences.version == 1 {
-            preferences.version = 2;
+            preferences.version = PREFERENCES_VERSION;
         }
         preferences.validate()?;
         Ok(preferences)
     }
     pub fn load(path: &Path) -> Result<Self> {
-        let values = match bounded_read(path, 256 * 1024) {
+        let values = match bounded_read(path, MAX_PREFERENCES_BYTES) {
             Ok(v) => v,
             Err(_) if !path.try_exists()? => {
-                // Read installed preferences saved before the application rename.
+                #[cfg(target_os = "linux")]
                 let data = gtk::glib::user_data_dir();
+                #[cfg(target_os = "linux")]
                 if path == data.join("clearwave/runtime/desktop.json") {
                     let legacy = data.join("rtx-voice-amd/runtime/desktop.json");
                     if legacy.is_file() {
@@ -98,39 +148,53 @@ impl Preferences {
     pub fn save(&self, path: &Path) -> Result<()> {
         self.validate()?;
         let bytes = serde_json::to_vec_pretty(self)?;
-        if bytes.len() > 256 * 1024 {
+        if bytes.len() > MAX_PREFERENCES_BYTES {
             return Err(Error::new("Saved preferences exceed 256 KiB"));
         }
         atomic_write(path, &bytes)
     }
 }
 
-pub fn runtime_directory() -> Result<PathBuf> {
-    let executable = std::env::current_exe()?;
-    let parent = executable
-        .parent()
-        .ok_or_else(|| Error::new("Executable has no parent directory"))?;
-    let project = if parent.file_name().is_some_and(|name| name == "bin") {
-        parent.parent().unwrap_or(parent)
-    } else {
-        parent
-    };
-    if project == Path::new("/usr") || project == Path::new("/usr/local") {
-        return Ok(gtk::glib::user_data_dir().join("clearwave/runtime"));
+pub fn decode_picker_response(response: &[u8]) -> Result<Option<PathBuf>> {
+    if response.len() > MAX_PICKER_RESPONSE_BYTES {
+        return Err(Error::new("Model picker response is too large"));
     }
-    Ok(project.join("runtime"))
+    let value: serde_json::Value = serde_json::from_slice(response)?;
+    if let Some(error) = value.get("error").and_then(|error| error.as_str()) {
+        return Err(Error::new(error));
+    }
+    let path: Option<String> = serde_json::from_value(value)?;
+    match path {
+        Some(path) if path.is_empty() || path.contains('\0') || !Path::new(&path).is_absolute() => {
+            Err(Error::new("Model picker returned an invalid local path"))
+        }
+        path => Ok(path.map(PathBuf::from)),
+    }
 }
-pub fn bounded_read(path: &Path, limit: usize) -> Result<Vec<u8>> {
-    let mut bytes = Vec::new();
-    File::open(path)?
-        .take((limit + 1) as u64)
-        .read_to_end(&mut bytes)?;
-    if bytes.len() > limit {
-        return Err(Error::new(
-            "Control or settings file exceeds its size limit",
-        ));
+
+pub fn runtime_directory() -> Result<PathBuf> {
+    #[cfg(windows)]
+    {
+        std::env::var_os("LOCALAPPDATA")
+            .map(|path| PathBuf::from(path).join("Clearwave/runtime"))
+            .ok_or_else(|| Error::new("Windows LOCALAPPDATA is unavailable"))
     }
-    Ok(bytes)
+    #[cfg(target_os = "linux")]
+    {
+        let executable = std::env::current_exe()?;
+        let parent = executable
+            .parent()
+            .ok_or_else(|| Error::new("Executable has no parent directory"))?;
+        let project = if parent.file_name().is_some_and(|name| name == "bin") {
+            parent.parent().unwrap_or(parent)
+        } else {
+            parent
+        };
+        if project == Path::new("/usr") || project == Path::new("/usr/local") {
+            return Ok(gtk::glib::user_data_dir().join("clearwave/runtime"));
+        }
+        Ok(project.join("runtime"))
+    }
 }
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
     let parent = path
@@ -143,13 +207,17 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
         .as_nanos();
     let temporary = parent.join(format!(".settings-{}-{stamp}.tmp", std::process::id()));
     let result = (|| {
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&temporary)?;
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        let mut file = options.open(&temporary)?;
         file.write_all(bytes)?;
         file.sync_all()?;
+        drop(file);
+        #[cfg(windows)]
+        crate::windows::replace_file(&temporary, path)?;
+        #[cfg(not(windows))]
         std::fs::rename(&temporary, path)?;
         Ok(())
     })();
@@ -165,7 +233,7 @@ pub struct StrengthControl {
 }
 impl StrengthControl {
     pub fn read(path: &Path) -> Result<f32> {
-        let control: Self = serde_json::from_slice(&bounded_read(path, 1024)?)?;
+        let control: Self = serde_json::from_slice(&bounded_read(path, MAX_CONTROL_BYTES)?)?;
         crate::audio::validate_strength(control.strength)?;
         Ok(control.strength)
     }
@@ -203,6 +271,38 @@ impl Levels {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn picker_reports_import_errors_and_preserves_local_paths() {
+        let path = std::env::temp_dir().join("RTX Voice installer.EXE");
+        let response = serde_json::to_vec(&Some(path.to_string_lossy().as_ref())).unwrap();
+        assert_eq!(decode_picker_response(&response).unwrap(), Some(path));
+        let error = decode_picker_response(br#"{"error":"Install 7-Zip to import this model"}"#)
+            .unwrap_err();
+        assert!(error.to_string().contains("7-Zip"));
+        assert_eq!(decode_picker_response(b"null").unwrap(), None);
+    }
+    #[test]
+    fn desktop_options_preserve_bundle_and_relative_settings_override() {
+        let args = ["first.json", "--settings", "settings/desktop.json"].map(PathBuf::from);
+        let options = DesktopOptions::parse(&args).unwrap();
+        assert_eq!(options.bundle, Some(PathBuf::from("first.json")));
+        assert_eq!(
+            options.settings,
+            std::env::current_dir()
+                .unwrap()
+                .join("settings/desktop.json")
+        );
+
+        assert!(DesktopOptions::parse(&[PathBuf::from("--settings")]).is_err());
+        assert!(DesktopOptions::parse(&["one", "two"].map(PathBuf::from)).is_err());
+        let args = ["--settings", "one", "bundle", "--settings", "two"].map(PathBuf::from);
+        let options = DesktopOptions::parse(&args).unwrap();
+        assert_eq!(
+            options.settings,
+            std::env::current_dir().unwrap().join("two")
+        );
+        assert_eq!(options.bundle, Some(PathBuf::from("bundle")));
+    }
     #[test]
     fn language_preferences_accept_old_files_and_round_trip_each_locale() {
         let old = r#"{"version":1,"active":{},"presets":[]}"#;
