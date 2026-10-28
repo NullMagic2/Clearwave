@@ -270,3 +270,8 @@ An installer content hash selects a local cache. Imports validate the supported
 graph and export weights before publishing their directory; failed imports keep
 the prior selected model. Cached models are reused, and a changed installer is
 rejected before cache publication. Vendor executables are never launched.
+
+Windows discovery is isolated by `windows/task.rs`: separate audio and graphics
+commands return bounded JSON with cancellation and a deadline. Job termination,
+process waits, and control-file removal run only on reaper threads. See
+`docs/WINDOWS_LIFECYCLE.md` for the maintenance preview's scope.

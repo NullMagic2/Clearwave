@@ -13,7 +13,7 @@ use cpal::{
     SupportedStreamConfig,
     traits::{DeviceTrait, HostTrait, StreamTrait},
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
     collections::VecDeque,
@@ -34,15 +34,17 @@ const CONTROL_INTERVAL_HOPS: u64 = 10;
 const DEVICE_TIMEOUT: Duration = Duration::from_secs(3);
 const CAPTURE_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct Endpoint {
     pub id: String,
     pub name: String,
 }
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 pub struct Endpoints {
     pub inputs: Vec<Endpoint>,
     pub outputs: Vec<Endpoint>,
+    #[serde(default)]
+    pub warnings: Vec<String>,
 }
 fn describe(device: Device) -> Result<Endpoint> {
     Ok(Endpoint {
@@ -53,19 +55,41 @@ fn describe(device: Device) -> Result<Endpoint> {
 fn audio_error(error: cpal::Error) -> Error {
     Error::new(format!("Windows audio: {error}"))
 }
+fn collect_endpoints(
+    devices: impl Iterator<Item = Result<Endpoint>>,
+    warnings: &mut Vec<String>,
+) -> Vec<Endpoint> {
+    devices
+        .filter_map(|device| match device {
+            Ok(endpoint) => Some(endpoint),
+            Err(error) => {
+                warnings.push(error.to_string());
+                None
+            }
+        })
+        .collect()
+}
 pub fn endpoints() -> Result<Endpoints> {
     let host = cpal::default_host();
+    let mut warnings = Vec::new();
+    let inputs = collect_endpoints(
+        host.input_devices()
+            .map(|devices| devices.map(describe).collect::<Vec<_>>())
+            .unwrap_or_else(|error| vec![Err(audio_error(error))])
+            .into_iter(),
+        &mut warnings,
+    );
+    let outputs = collect_endpoints(
+        host.output_devices()
+            .map(|devices| devices.map(describe).collect::<Vec<_>>())
+            .unwrap_or_else(|error| vec![Err(audio_error(error))])
+            .into_iter(),
+        &mut warnings,
+    );
     Ok(Endpoints {
-        inputs: host
-            .input_devices()
-            .map_err(audio_error)?
-            .map(describe)
-            .collect::<Result<_>>()?,
-        outputs: host
-            .output_devices()
-            .map_err(audio_error)?
-            .map(describe)
-            .collect::<Result<_>>()?,
+        inputs,
+        outputs,
+        warnings,
     })
 }
 
@@ -298,5 +322,34 @@ pub fn run(args: &[PathBuf]) -> Result<()> {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn unavailable_endpoint_does_not_hide_healthy_microphones() {
+        let devices = [
+            Ok(Endpoint {
+                id: "first".into(),
+                name: "First".into(),
+            }),
+            Err(Error::new("Unavailable audio endpoint")),
+            Ok(Endpoint {
+                id: "second".into(),
+                name: "Second".into(),
+            }),
+        ];
+        let mut warnings = Vec::new();
+        let result = collect_endpoints(devices.into_iter(), &mut warnings);
+        assert_eq!(
+            result
+                .iter()
+                .map(|endpoint| endpoint.id.as_str())
+                .collect::<Vec<_>>(),
+            ["first", "second"]
+        );
+        assert_eq!(warnings, ["Unavailable audio endpoint"]);
     }
 }

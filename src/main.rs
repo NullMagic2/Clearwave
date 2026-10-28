@@ -166,6 +166,11 @@ fn run(args: Vec<PathBuf>) -> Result<()> {
                 .is_some_and(|mode| mode.as_os_str() == "installer"),
         ),
         #[cfg(windows)]
+        ("__windows-devices", 1) => {
+            println!("{}", serde_json::to_string(&windows::audio::endpoints()?)?);
+            Ok(())
+        }
+        #[cfg(windows)]
         ("__windows-live", 6) => windows::audio::run(&args[1..]),
         ("licenses", 1) => {
             println!(

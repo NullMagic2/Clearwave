@@ -19,8 +19,9 @@ use ::windows::{
         },
         Graphics::Gdi::{
             CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, COLOR_BTNFACE, CreateFontW, DEFAULT_CHARSET,
-            DEFAULT_PITCH, DeleteObject, FW_NORMAL, GetSysColorBrush, HFONT, HGDIOBJ,
-            OUT_DEFAULT_PRECIS, RDW_ALLCHILDREN, RDW_ERASE, RDW_INVALIDATE, RedrawWindow,
+            DEFAULT_GUI_FONT, DEFAULT_PITCH, DeleteObject, FW_NORMAL, GetStockObject,
+            GetSysColorBrush, HFONT, HGDIOBJ, OUT_DEFAULT_PRECIS, RDW_ALLCHILDREN, RDW_ERASE,
+            RDW_INVALIDATE, RedrawWindow,
         },
         System::LibraryLoader::GetModuleHandleW,
         UI::{
@@ -37,7 +38,7 @@ use std::{
     path::PathBuf,
     process::{Command, Stdio},
     sync::mpsc::{self, Receiver, SyncSender},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 const SOURCE: u16 = 101;
@@ -96,12 +97,14 @@ const LOG_FLOOR: f64 = 1e-6;
 const PERCENT_MAX: usize = 100;
 const MAX_PATH_TEXT: usize = 4096;
 const TIMER_ID: usize = 1;
+const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
 const FONT_BODY: usize = 0;
 const FONT_SETTINGS: usize = 1;
 const FLAG_TRANSPARENT_COLOR: COLORREF = COLORREF(0x00ff00ff);
 
 enum Event {
-    Devices(Result<(super::audio::Endpoints, Vec<AdapterInfo>)>),
+    Devices(Result<super::audio::Endpoints>),
+    Adapters(Result<Vec<AdapterInfo>>),
     Worker(u32, serde_json::Value),
     Log(u32, String),
 }
@@ -126,7 +129,8 @@ struct App {
     inputs: Vec<super::audio::Endpoint>,
     outputs: Vec<super::audio::Endpoint>,
     adapters: Vec<String>,
-    discovering: bool,
+    devices_task: Option<super::task::JsonTask>,
+    adapters_task: Option<super::task::JsonTask>,
     sender: SyncSender<Event>,
     receiver: Receiver<Event>,
     live: Option<Live>,
@@ -317,7 +321,8 @@ impl App {
             inputs: Vec::new(),
             outputs: Vec::new(),
             adapters: Vec::new(),
-            discovering: false,
+            devices_task: None,
+            adapters_task: None,
             sender,
             receiver,
             live: None,
@@ -810,14 +815,14 @@ impl App {
             for id in [SOURCE, OUTPUT, BUNDLE, ADAPTER] {
                 let _ = EnableWindow(self.control(id), idle);
             }
-            let _ = EnableWindow(self.control(REFRESH), idle && !self.discovering);
+            let _ = EnableWindow(self.control(REFRESH), idle && !self.discovering());
             for id in [BROWSE, INSTALLER] {
                 let _ = EnableWindow(self.control(id), idle && self.picker.is_none());
             }
             let _ = EnableWindow(self.control(CANCEL_PICKER), self.picker.is_some());
             let _ = EnableWindow(
                 self.control(START),
-                self.live.is_some() || (!self.discovering && self.picker.is_none()),
+                self.live.is_some() || (!self.discovering() && self.picker.is_none()),
             );
         }
         if self
@@ -838,7 +843,9 @@ impl App {
         Ok(())
     }
     fn request_close(&mut self, window: HWND) -> Result<()> {
-        self.save(false)?;
+        if let Err(error) = self.save(false) {
+            self.message = error.to_string();
+        }
         if window == self.windows.settings {
             self.picker.take();
 
@@ -853,7 +860,7 @@ impl App {
             self.picker.take();
 
             // SAFETY: this thread owns the active native message pump.
-            // Saving succeeded before requesting its normal termination.
+            // Saving is best-effort; a preference failure must not trap the window.
             // App's owner then destroys windows before dependent graphics resources.
             unsafe {
                 PostQuitMessage(0);
@@ -861,22 +868,21 @@ impl App {
         }
         Ok(())
     }
+    fn discovering(&self) -> bool {
+        self.devices_task.is_some() || self.adapters_task.is_some()
+    }
     fn refresh(&mut self) {
-        if self.discovering || self.live.is_some() {
+        if self.discovering() || self.live.is_some() {
             return;
         }
-        self.discovering = true;
-        let sender = self.sender.clone();
-        std::thread::spawn(move || {
-            let result = super::audio::endpoints().map(|endpoints| {
-                let adapters = crate::gpu::adapters()
-                    .into_iter()
-                    .filter(|a| a.vendor == 0x1002 && a.device_type != "Cpu")
-                    .collect();
-                (endpoints, adapters)
-            });
-            let _ = sender.send(Event::Devices(result));
-        });
+        match super::task::JsonTask::start(&["__windows-devices"], DISCOVERY_TIMEOUT) {
+            Ok(task) => self.devices_task = Some(task),
+            Err(error) => self.message = error.to_string(),
+        }
+        match super::task::JsonTask::start(&["gpu-info"], DISCOVERY_TIMEOUT) {
+            Ok(task) => self.adapters_task = Some(task),
+            Err(error) => self.message = error.to_string(),
+        }
     }
     fn stop(&mut self) {
         self.live.take();
@@ -886,6 +892,11 @@ impl App {
     fn start(&mut self) -> Result<()> {
         self.preferences.active.bundle = get_text(self.control(BUNDLE));
         self.preferences.validate()?;
+        if self.adapters.is_empty() {
+            return Err(Error::new(
+                "No supported AMD Vulkan adapter was found. Check the AMD driver and refresh before starting.",
+            ));
+        }
         let active = &self.preferences.active;
         if active.bundle.is_empty() {
             return Err(Error::new(self.text(Text::ChooseBundle)));
@@ -973,60 +984,95 @@ impl App {
         Ok(())
     }
     fn tick(&mut self) -> Result<()> {
+        if let Some(result) = self
+            .devices_task
+            .as_ref()
+            .and_then(super::task::JsonTask::poll)
+        {
+            self.devices_task.take();
+            let result =
+                result.and_then(|value| serde_json::from_value(value).map_err(Error::from));
+            let _ = self.sender.try_send(Event::Devices(result));
+        }
+        if let Some(result) = self
+            .adapters_task
+            .as_ref()
+            .and_then(super::task::JsonTask::poll)
+        {
+            self.adapters_task.take();
+            let result =
+                result.and_then(|value| serde_json::from_value(value).map_err(Error::from));
+            let _ = self.sender.try_send(Event::Adapters(result));
+        }
         while let Ok(event) = self.receiver.try_recv() {
             match event {
-                Event::Devices(result) => {
-                    self.discovering = false;
-                    match result {
-                        Ok((devices, adapters)) => {
-                            self.inputs = devices.inputs;
-                            self.outputs = devices.outputs;
-                            let input = self
+                Event::Devices(result) => match result {
+                    Ok(devices) => {
+                        if !devices.warnings.is_empty() {
+                            self.message = devices.warnings.join("; ");
+                        }
+                        self.inputs = devices.inputs;
+                        self.outputs = devices.outputs;
+                        let input = self
+                            .inputs
+                            .iter()
+                            .position(|d| d.id == self.preferences.active.source)
+                            .or_else(|| (!self.inputs.is_empty()).then_some(0));
+                        self.preferences.active.source =
+                            input.map(|i| self.inputs[i].id.clone()).unwrap_or_default();
+                        let output = self
+                            .outputs
+                            .iter()
+                            .position(|d| d.id == self.preferences.active.render);
+                        if output.is_none() {
+                            self.preferences.active.render.clear();
+                        }
+                        fill_combo(
+                            self.control(SOURCE),
+                            &self
                                 .inputs
                                 .iter()
-                                .position(|d| d.id == self.preferences.active.source)
-                                .or_else(|| (!self.inputs.is_empty()).then_some(0));
-                            self.preferences.active.source =
-                                input.map(|i| self.inputs[i].id.clone()).unwrap_or_default();
-                            let output = self
+                                .map(|d| d.name.clone())
+                                .collect::<Vec<_>>(),
+                            input,
+                        );
+                        fill_combo(
+                            self.control(OUTPUT),
+                            &self
                                 .outputs
                                 .iter()
-                                .position(|d| d.id == self.preferences.active.render);
-                            if output.is_none() {
-                                self.preferences.active.render.clear();
-                            }
-                            fill_combo(
-                                self.control(SOURCE),
-                                &self
-                                    .inputs
-                                    .iter()
-                                    .map(|d| d.name.clone())
-                                    .collect::<Vec<_>>(),
-                                input,
-                            );
-                            fill_combo(
-                                self.control(OUTPUT),
-                                &self
-                                    .outputs
-                                    .iter()
-                                    .map(|d| d.name.clone())
-                                    .collect::<Vec<_>>(),
-                                output,
-                            );
-                            self.adapters = adapters.into_iter().map(|a| a.name).collect();
-                            let names = std::iter::once(self.text(Text::Automatic).to_owned())
-                                .chain(self.adapters.iter().cloned())
-                                .collect::<Vec<_>>();
-                            let adapter = self
-                                .adapters
-                                .iter()
-                                .position(|a| *a == self.preferences.active.adapter)
-                                .map_or(0, |i| i + 1);
-                            fill_combo(self.control(ADAPTER), &names, Some(adapter));
-                        }
-                        Err(error) => self.message = error.to_string(),
+                                .map(|d| d.name.clone())
+                                .collect::<Vec<_>>(),
+                            output,
+                        );
                     }
-                }
+                    Err(error) => self.message = error.to_string(),
+                },
+                Event::Adapters(result) => match result {
+                    Ok(adapters) => {
+                        self.adapters = adapters
+                            .into_iter()
+                            .filter(|a| {
+                                a.vendor == 0x1002
+                                    && matches!(
+                                        a.device_type.as_str(),
+                                        "DiscreteGpu" | "IntegratedGpu"
+                                    )
+                            })
+                            .map(|a| a.name)
+                            .collect();
+                        let names = std::iter::once(self.text(Text::Automatic).to_owned())
+                            .chain(self.adapters.iter().cloned())
+                            .collect::<Vec<_>>();
+                        let adapter = self
+                            .adapters
+                            .iter()
+                            .position(|a| *a == self.preferences.active.adapter)
+                            .map_or(0, |i| i + 1);
+                        fill_combo(self.control(ADAPTER), &names, Some(adapter));
+                    }
+                    Err(error) => self.message = error.to_string(),
+                },
                 Event::Worker(id, event) if self.live.as_ref().is_some_and(|l| l.id == id) => {
                     match event["event"].as_str() {
                         Some("started") => {
@@ -1178,8 +1224,17 @@ impl App {
 }
 impl Drop for App {
     fn drop(&mut self) {
+        self.devices_task.take();
+        self.adapters_task.take();
         self.live.take();
         self.picker.take();
+        // SAFETY: controls and fonts belong to this thread's window hierarchy.
+        // Detach application fonts before controls release their cached DCs.
+        // The borrowed system font stays owned by Windows and is never deleted.
+        let system_font = unsafe { GetStockObject(DEFAULT_GUI_FONT) };
+        for control in self.controls.values() {
+            send(*control, WM_SETFONT, system_font.0 as usize, 0);
+        }
         self.windows.destroy();
         delete_fonts(self.fonts.drain(..));
     }
@@ -1414,7 +1469,9 @@ pub fn launch(args: &[PathBuf]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ::windows::Win32::Graphics::Gdi::GetObjectType;
+    use ::windows::Win32::System::Threading::{GR_GDIOBJECTS, GetCurrentProcess, GetGuiResources};
+    const RESOURCE_CHECK_CYCLES: usize = 8;
+    const MAX_RETAINED_GDI_OBJECTS: u32 = 4;
 
     struct SettingsDirectory(PathBuf);
     impl SettingsDirectory {
@@ -1463,17 +1520,16 @@ mod tests {
         assert_eq!(saved.active.strength, 0.73);
 
         app.path = directory.0.clone();
-        assert!(app.request_close(main).is_err());
-        let fonts = app.fonts.clone();
+        assert!(app.request_close(main).is_ok());
 
         // SAFETY: these handles belong to the App retained on this test thread.
         // Native traversal only queries siblings, and PeekMessage does not dispatch.
-        // Graphics handles are queried again only after their owner has dropped.
+        // A failed save must still request quit and release the owned windows.
         unsafe {
             assert!(IsWindow(Some(main)).as_bool());
             assert!(IsWindow(Some(settings)).as_bool());
             let mut quit = MSG::default();
-            assert!(!PeekMessageW(&mut quit, None, WM_QUIT, WM_QUIT, PM_NOREMOVE).as_bool());
+            assert!(PeekMessageW(&mut quit, None, WM_QUIT, WM_QUIT, PM_REMOVE).as_bool());
             let expected = [LANGUAGE, SOURCE, REFRESH, OUTPUT, STRENGTH, SETTINGS, START];
             let mut previous = None;
             for id in expected {
@@ -1485,7 +1541,18 @@ mod tests {
             drop(app);
             assert!(!IsWindow(Some(main)).as_bool());
             assert!(!IsWindow(Some(settings)).as_bool());
-            assert!(fonts.iter().all(|font| GetObjectType(HGDIOBJ(font.0)) == 0));
+            let baseline = GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS);
+            for _ in 0..RESOURCE_CHECK_CYCLES {
+                let windows = OwnedWindows::create().unwrap();
+                let app =
+                    App::create(windows, directory.0.join("resource-check.json"), None).unwrap();
+                drop(app);
+            }
+            let retained = GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS);
+            assert!(
+                retained <= baseline + MAX_RETAINED_GDI_OBJECTS,
+                "GDI resources grew from {baseline} to {retained}"
+            );
         }
     }
 

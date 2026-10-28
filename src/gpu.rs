@@ -4,7 +4,7 @@ use crate::{
     operators::{GRU_BIAS_BLOCKS, GRU_GATES},
     package::Model,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     sync::mpsc,
     time::{Duration, Instant},
@@ -28,7 +28,7 @@ pub(crate) enum Operator {
     Project,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct AdapterInfo {
     pub name: String,
     pub vendor: u32,
