@@ -1,20 +1,5 @@
 # Clearwave
 
-**Experimental: speech quality and RTX Voice equivalence remain unverified.**
-Version 0.6.6 corrected an output-projection layout error in earlier builds that
-could suppress speech. Controlled comparisons with generated speech and two
-natural speech references improve after the correction. Muffled speech and
-residual static remain unresolved in a local microphone sample. CPU/GPU agreement
-alone is not a speech-quality result.
-
-Version 0.7.0 completes the supported feature graph mapping and
-adds a native Windows interface with WASAPI audio. All 14 processing stages and
-32 tensor layouts are explicit; reference input-level conditioning and vendor
-output parity remain separate work. The waveform adapter now retains three initial
-recurrent-state updates that earlier builds skipped; this corrects startup
-sequencing, with mixed measured speech-quality changes. See
-[graph evidence](docs/MODEL_GRAPH.md) and [audio alignment](docs/AUDIO_ALIGNMENT.md).
-
 ## What is Clearwave?
 
 Clearwave is an experimental effort to run the RTX Voice model on AMD-based Linux and Windows systems and reduce microphone background noise in recordings and calls.
@@ -256,46 +241,6 @@ intensity rule, although agreement with the running NVIDIA application remains
 unverified. The feature commands return the raw noise masks. See
 [the model contract](docs/MODEL_CONTRACT.md) for the threshold calculation.
 
-## Speech-quality evaluation
-
-The 0.6.6 projection correction improves clean-reference voice levels and
-noise separation in controlled comparisons, without adding output gain.
-On two natural clean speech references, measured voice attenuation falls from
-about 7 dB to less than 0.4 dB. These results do not establish quality for every
-microphone, speaker, or noise environment, or equivalence to NVIDIA's output.
-
-The reproducible local comparison tool accepts your own clean reference files:
-
-```sh
-python3 tools/benchmark_speech.py --binary bin/clearwave \
-  --model /path/to/models --clean /path/to/clean-speech.wav \
-  --output /path/to/new-comparison-directory
-```
-
-It requires Python 3, NumPy, and FFmpeg. The tool adds controlled static, hum,
-and clicks, runs full-strength processing, and reports voice level, SI-SDR, and
-noise after speech ends. Comparison audio stays in the specified local directory.
-See [the correction and measurement notes](docs/OUTPUT_PROJECTION.md).
-
-`wav-features` uses a periodic Hamming window, a 1,920-sample FFT, 480-sample hop,
-and 320 area-normalized Slaney mel bands. Mel power is clipped between −40 and
-48 dB and mapped to 0–1. Frame zero begins at sample −1,440; three tail frames
-complete the overlap. Features outside the sequence are zero. Output is aligned
-to input sample zero after inverse FFT and squared-window normalization.
-See `docs/MODEL_CONTRACT.md` for the supported conventions and remaining parity
-questions.
-
-The CLI reports the actual adapter, execution mode, resident parameter bytes,
-processing time, sample count, RMS levels,
-and samples above full scale. It preserves float output without clipping or
-automatic volume normalization. Lower output RMS alone does not prove speech
-preservation or effective noise removal.
-
-The AMD network keeps all 62,453,348 bytes of model parameters, recurrent states,
-intermediate results, and bind groups resident on the GPU. Each feature step
-uploads 8,960 bytes of context and reads back 3,844 bytes of mask data. GPU state
-commits after successful output validation. The explicit CPU commands retain the
-independent CPU path.
 
 ## Use the processed microphone across applications
 
