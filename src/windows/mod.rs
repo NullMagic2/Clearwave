@@ -191,6 +191,12 @@ impl OwnedChild {
     }
 
     pub fn spawn(command: &mut Command) -> Result<Self> {
+        Self::spawn_with_flags(command, CREATE_NO_WINDOW.0)
+    }
+    pub fn spawn_background(command: &mut Command) -> Result<Self> {
+        Self::spawn_with_flags(command, CREATE_NO_WINDOW.0 | BELOW_NORMAL_PRIORITY_CLASS.0)
+    }
+    fn spawn_with_flags(command: &mut Command, flags: u32) -> Result<Self> {
         use std::os::windows::process::CommandExt;
         // SAFETY: this function owns the job until it transfers to OwnedChild.
         // Job-information buffers have the documented structure and explicit size.
@@ -208,10 +214,7 @@ impl OwnedChild {
             ) {
                 return Err(os_error(error));
             }
-            let child = match command
-                .creation_flags(CREATE_NO_WINDOW.0 | BELOW_NORMAL_PRIORITY_CLASS.0)
-                .spawn()
-            {
+            let child = match command.creation_flags(flags).spawn() {
                 Ok(child) => child,
                 Err(error) => {
                     return Err(error.into());

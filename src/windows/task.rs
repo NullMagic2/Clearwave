@@ -59,7 +59,7 @@ impl Drop for JsonTask {
     }
 }
 fn run(command: &mut Command, timeout: Duration, cancelled: &AtomicBool) -> Result<Value> {
-    let mut child = OwnedChild::spawn(command)?;
+    let mut child = OwnedChild::spawn_background(command)?;
     let output = child
         .process()?
         .stdout

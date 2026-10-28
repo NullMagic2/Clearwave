@@ -54,6 +54,7 @@ def main():
             ('LICENSE', 'LICENSE'),
             ('Cargo.lock', 'Cargo.lock'),
             ('packaging/windows/BUILDING.md', 'WINDOWS.md'),
+            ('docs/WINDOWS_LIFECYCLE.md', 'WINDOWS-MAINTENANCE.md'),
             ('ui/flags/LICENSE', 'flag-icons-LICENSE'),
             ('ui/flags/SOURCE.json', 'flag-icons-SOURCE.json'),
         ]:

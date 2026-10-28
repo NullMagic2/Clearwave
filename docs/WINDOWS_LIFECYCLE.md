@@ -11,8 +11,8 @@ establishing the report's exact cause.
 - Endpoint ID/name failures become warnings while healthy endpoints remain in
   the list. Failure to enumerate one direction preserves the other direction.
 - Closing a kill-on-close Windows job, terminating its process, waiting, and
-  deleting its control file all happen on a reaper thread. Helper processes run
-  below normal CPU priority. App shutdown cancels pending discovery tasks.
+  deleting its control file all happen on a reaper thread. Discovery processes run
+  below normal CPU priority; audio workers retain normal priority. App shutdown cancels pending discovery tasks.
 - A failed preferences write no longer prevents closing the main window.
 - Controls detach app-owned fonts during teardown. The resource regression
   measures bounded GDI counts across repeated lifetimes instead of inspecting

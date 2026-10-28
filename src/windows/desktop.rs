@@ -1046,7 +1046,7 @@ impl App {
                             output,
                         );
                     }
-                    Err(error) => self.message = error.to_string(),
+                    Err(error) => self.message = format!("Audio device discovery: {error}"),
                 },
                 Event::Adapters(result) => match result {
                     Ok(adapters) => {
@@ -1071,7 +1071,7 @@ impl App {
                             .map_or(0, |i| i + 1);
                         fill_combo(self.control(ADAPTER), &names, Some(adapter));
                     }
-                    Err(error) => self.message = error.to_string(),
+                    Err(error) => self.message = format!("Graphics discovery: {error}"),
                 },
                 Event::Worker(id, event) if self.live.as_ref().is_some_and(|l| l.id == id) => {
                     match event["event"].as_str() {
