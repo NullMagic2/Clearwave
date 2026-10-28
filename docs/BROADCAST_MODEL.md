@@ -125,6 +125,11 @@ do not increase implementation percentages.
 
 ## Repeating a comparison
 
+From 0.7.1-dev.5, generate the neutral candidate with `denoise-reference` (and
+echo reduction off). Regular `denoise` and desktop output add the automatic
+[voice balance](VOICE_BALANCE.md) stage, which intentionally changes the result.
+The measurements above describe the neutral model path in 0.7.1-dev.4.
+
 The reusable comparison command reads existing local audio only:
 
 ```sh

@@ -85,6 +85,7 @@ def main():
         doc = base/'usr/share/doc/clearwave'
         install(PROJECT/'README.md', doc/'README.md')
         install(PROJECT/'docs/linux-frontend.png', doc/'docs/linux-frontend.png')
+        install(PROJECT/'docs/VOICE_BALANCE.md', doc/'docs/VOICE_BALANCE.md')
         install(PROJECT/'docs/BROADCAST_MODEL.md', doc/'docs/BROADCAST_MODEL.md')
         install(PROJECT/'docs/broadcast-comparison.json', doc/'docs/broadcast-comparison.json')
         install(PROJECT/'docs/ECHO_REDUCTION.md', doc/'ECHO_REDUCTION.md')

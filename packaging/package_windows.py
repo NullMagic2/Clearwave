@@ -24,24 +24,26 @@ ZIP_COMPRESSION_LEVEL = 9
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', type=Path, default=PROJECT/'bin/clearwave.exe')
+    parser.add_argument('--apo', type=Path, default=PROJECT/'bin/clearwave_apo.dll')
     parser.add_argument('--output', type=Path, default=PROJECT/'releases')
     args = parser.parse_args()
     binary = args.binary.resolve(strict=True)
+    apo = args.apo.resolve(strict=True)
 
-    with binary.open('rb') as executable:
-        if executable.read(2) != b'MZ':
-            raise SystemExit('Expected a Windows PE executable')
-        executable.seek(PE_OFFSET)
-        offset = executable.read(struct.calcsize('<I'))
-        if len(offset) != struct.calcsize('<I'):
-            raise SystemExit('Incomplete PE header offset')
-        executable.seek(struct.unpack('<I', offset)[0])
-        header = executable.read(PE_HEADER_BYTES)
-        if len(header) != PE_HEADER_BYTES or header[:4] != b'PE\0\0':
-            raise SystemExit('Invalid PE header')
-        if struct.unpack('<H', header[4:])[0] != PE_X86_64:
-            raise SystemExit('Only x86-64 Windows executables are supported')
-
+    for artifact in (binary, apo):
+        with artifact.open('rb') as executable:
+            if executable.read(2) != b'MZ':
+                raise SystemExit('Expected a Windows PE executable')
+            executable.seek(PE_OFFSET)
+            offset = executable.read(struct.calcsize('<I'))
+            if len(offset) != struct.calcsize('<I'):
+                raise SystemExit('Incomplete PE header offset')
+            executable.seek(struct.unpack('<I', offset)[0])
+            header = executable.read(PE_HEADER_BYTES)
+            if len(header) != PE_HEADER_BYTES or header[:4] != b'PE\0\0':
+                raise SystemExit('Invalid PE header')
+            if struct.unpack('<H', header[4:])[0] != PE_X86_64:
+                raise SystemExit('Only x86-64 Windows executables are supported')
     version = tomllib.loads((PROJECT/'Cargo.toml').read_text())['package']['version']
     args.output.mkdir(parents=True, exist_ok=True)
     archive = args.output/f'clearwave-{version}-windows-x86_64.zip'
@@ -49,14 +51,18 @@ def main():
     with tempfile.TemporaryDirectory(prefix='windows-stage-', dir=args.output) as temporary:
         root = Path(temporary)/'Clearwave'
         install(binary, root/'clearwave.exe', 0o755)
+        install(apo, root/'clearwave_apo.dll', 0o755)
         for source, destination in [
             ('README.md', 'README.md'),
             ('docs/linux-frontend.png', 'docs/linux-frontend.png'),
+            ('docs/VOICE_BALANCE.md', 'docs/VOICE_BALANCE.md'),
             ('docs/BROADCAST_MODEL.md', 'docs/BROADCAST_MODEL.md'),
             ('docs/broadcast-comparison.json', 'docs/broadcast-comparison.json'),
             ('LICENSE', 'LICENSE'),
             ('Cargo.lock', 'Cargo.lock'),
             ('packaging/windows/BUILDING.md', 'WINDOWS.md'),
+            ('packaging/windows/setup-apo.ps1', 'setup-apo.ps1'),
+            ('docs/WINDOWS_APO.md', 'WINDOWS-APO.md'),
             ('docs/WINDOWS_LIFECYCLE.md', 'WINDOWS-MAINTENANCE.md'),
             ('docs/ECHO_REDUCTION.md', 'ECHO_REDUCTION.md'),
             ('ui/flags/LICENSE', 'flag-icons-LICENSE'),
@@ -77,6 +83,9 @@ def main():
         'target': 'x86_64-pc-windows-gnu',
         'filename': archive.name,
         'sha256': hashlib.sha256(archive.read_bytes()).hexdigest(),
+        'windows_audio': 'capture-apo-preview',
+        'native_audio_host_verified': False,
+        'apo_sha256': hashlib.sha256(apo.read_bytes()).hexdigest(),
         'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
         'rust_dependency_notices': len(notices),
         'nvidia_assets_included': False,

@@ -1,357 +1,299 @@
-//! WASAPI device enumeration and bounded microphone-to-render audio streaming.
-//! CPAL owns Windows audio clients; callbacks only transfer PCM blocks.
-//! The process's worker thread owns model loading, inference and level reporting.
-#![forbid(unsafe_code)]
+//! Enumerate existing capture endpoints and serve the capture APO's PCM packets.
+//! The worker owns model inference; no WASAPI capture or render stream is opened.
+//! Stopping the desktop-owned process makes the APO return time-aligned dry audio.
+use super::{Apartment, os_error, wide};
 use crate::{
     Error, Result,
-    audio::{HOP, RATE, StreamProcessor},
+    audio::StreamProcessor,
     controls::{Levels, ProcessingControl},
-    network::{Backend, CONTEXT, Network},
+    network::{Backend, Network},
 };
-use cpal::{
-    Device, DeviceId, FromSample, SampleFormat, SizedSample, Stream, StreamConfig,
-    SupportedStreamConfig,
-    traits::{DeviceTrait, HostTrait, StreamTrait},
+use ::windows::{
+    Win32::{
+        Devices::FunctionDiscovery::PKEY_Device_FriendlyName,
+        Media::Audio::{DEVICE_STATE_ACTIVE, IMMDeviceEnumerator, MMDeviceEnumerator, eCapture},
+        System::{
+            Com::{
+                CLSCTX_INPROC_SERVER, CoCreateInstance, CoTaskMemFree, STGM_READ,
+                StructuredStorage::{PropVariantClear, PropVariantToStringAlloc},
+            },
+            Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RegGetValueW},
+        },
+    },
+    core::PCWSTR,
+};
+use clearwave_apo::{
+    pipe::Pipe,
+    protocol::{self, HOP, Packet},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
-    collections::VecDeque,
     path::PathBuf,
     sync::{
         Arc,
-        atomic::{AtomicBool, AtomicU64, Ordering},
-        mpsc::{self, Receiver, SyncSender, TryRecvError},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
-const DEVICE_SAMPLE_RATE: u32 = RATE as u32;
-const MAX_DEVICE_CHANNELS: u16 = 8;
-const AUDIO_QUEUE_BLOCKS: usize = 32;
-const PLAYBACK_PRIME_HOPS: usize = CONTEXT + 1;
-const CONTROL_INTERVAL_HOPS: u64 = 10;
-const DEVICE_TIMEOUT: Duration = Duration::from_secs(3);
-const CAPTURE_POLL_INTERVAL: Duration = Duration::from_millis(100);
-
+const POLL: Duration = Duration::from_millis(10);
+const CONTROL_HOPS: usize = 10;
 #[derive(Clone, Deserialize, Serialize)]
 pub struct Endpoint {
     pub id: String,
     pub name: String,
+    pub apo_installed: bool,
 }
 #[derive(Deserialize, Serialize)]
 pub struct Endpoints {
     pub inputs: Vec<Endpoint>,
-    pub outputs: Vec<Endpoint>,
     #[serde(default)]
     pub warnings: Vec<String>,
 }
-fn describe(device: Device) -> Result<Endpoint> {
-    Ok(Endpoint {
-        id: device.id().map_err(audio_error)?.to_string(),
-        name: device.description().map_err(audio_error)?.name().to_owned(),
-    })
-}
-fn audio_error(error: cpal::Error) -> Error {
-    Error::new(format!("Windows audio: {error}"))
-}
-fn collect_endpoints(
-    devices: impl Iterator<Item = Result<Endpoint>>,
-    warnings: &mut Vec<String>,
-) -> Vec<Endpoint> {
-    devices
-        .filter_map(|device| match device {
-            Ok(endpoint) => Some(endpoint),
-            Err(error) => {
-                warnings.push(error.to_string());
-                None
-            }
-        })
-        .collect()
+
+pub fn installed(endpoint: &str) -> bool {
+    let Some(guid) = protocol::endpoint_guid(endpoint) else {
+        return false;
+    };
+    let key = wide(format!(
+        r"SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Capture\{guid}\FxProperties"
+    ));
+    let property = wide(protocol::MODE_PROPERTY);
+    let mut value = [0u16; 80];
+    let mut bytes = size_of_val(&value) as u32;
+    // SAFETY: the registry call writes only within the fixed UTF-16 buffer.
+    // This reads one capture endpoint's effect class without changing settings.
+    // An inaccessible or differently configured endpoint is treated as unattached.
+    unsafe {
+        if RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            PCWSTR(key.as_ptr()),
+            PCWSTR(property.as_ptr()),
+            RRF_RT_REG_SZ,
+            None,
+            Some(value.as_mut_ptr().cast()),
+            Some(&mut bytes),
+        )
+        .is_err()
+        {
+            return false;
+        }
+    }
+    let length = value.iter().position(|v| *v == 0).unwrap_or(value.len());
+    String::from_utf16_lossy(&value[..length]).eq_ignore_ascii_case(protocol::CLSID_TEXT)
 }
 pub fn endpoints() -> Result<Endpoints> {
-    let host = cpal::default_host();
-    let mut warnings = Vec::new();
-    let inputs = collect_endpoints(
-        host.input_devices()
-            .map(|devices| devices.map(describe).collect::<Vec<_>>())
-            .unwrap_or_else(|error| vec![Err(audio_error(error))])
-            .into_iter(),
-        &mut warnings,
-    );
-    let outputs = collect_endpoints(
-        host.output_devices()
-            .map(|devices| devices.map(describe).collect::<Vec<_>>())
-            .unwrap_or_else(|error| vec![Err(audio_error(error))])
-            .into_iter(),
-        &mut warnings,
-    );
-    Ok(Endpoints {
-        inputs,
-        outputs,
-        warnings,
-    })
-}
-
-fn configuration(device: &Device, input: bool) -> Result<SupportedStreamConfig> {
-    let configs: Vec<_> = if input {
-        device
-            .supported_input_configs()
-            .map_err(audio_error)?
-            .collect()
-    } else {
-        device
-            .supported_output_configs()
-            .map_err(audio_error)?
-            .collect()
+    let _apartment = Apartment::new()?;
+    let mut result = Endpoints {
+        inputs: Vec::new(),
+        warnings: Vec::new(),
     };
-    configs
-        .into_iter()
-        .filter(|c| {
-            c.channels() > 0
-                && c.channels() <= MAX_DEVICE_CHANNELS
-                && c.min_sample_rate() <= DEVICE_SAMPLE_RATE
-                && c.max_sample_rate() >= DEVICE_SAMPLE_RATE
-                && matches!(
-                    c.sample_format(),
-                    SampleFormat::F32 | SampleFormat::I16 | SampleFormat::I32
-                )
-        })
-        .min_by_key(|c| (c.sample_format() != SampleFormat::F32, c.channels()))
-        .map(|c| c.with_sample_rate(DEVICE_SAMPLE_RATE)).ok_or_else(|| Error::new(
-        "This device has no supported 48 kHz PCM stream. Select 48000 Hz in Windows Sound settings or choose another device."))
-}
-fn input_stream<T>(
-    device: &Device,
-    config: StreamConfig,
-    sender: SyncSender<Vec<f32>>,
-    failed: Arc<AtomicBool>,
-) -> Result<Stream>
-where
-    T: SizedSample,
-    f32: FromSample<T>,
-{
-    let channels = usize::from(config.channels);
-    let callback_failed = failed.clone();
-    device
-        .build_input_stream::<T, _, _>(
-            config,
-            move |data, _| {
-                for block in data.chunks(HOP * channels) {
-                    let mono: Vec<f32> = block
-                        .chunks_exact(channels)
-                        .map(|frame| {
-                            frame.iter().map(|v| v.to_sample::<f32>()).sum::<f32>()
-                                / channels as f32
-                        })
-                        .collect();
-                    if sender.try_send(mono).is_err() {
-                        callback_failed.store(true, Ordering::Relaxed);
-                        break;
-                    }
-                }
-            },
-            move |_| {
-                failed.store(true, Ordering::Relaxed);
-            },
-            Some(DEVICE_TIMEOUT),
-        )
-        .map_err(audio_error)
-}
-fn output_stream<T>(
-    device: &Device,
-    config: StreamConfig,
-    receiver: Receiver<Vec<f32>>,
-    failed: Arc<AtomicBool>,
-    underruns: Arc<AtomicU64>,
-) -> Result<Stream>
-where
-    T: SizedSample + FromSample<f32>,
-{
-    let channels = usize::from(config.channels);
-    let mut current = Vec::new().into_iter();
-    let mut started = false;
-    device
-        .build_output_stream::<T, _, _>(
-            config,
-            move |data, _| {
-                for frame in data.chunks_exact_mut(channels) {
-                    if current.len() == 0 {
-                        match receiver.try_recv() {
-                            Ok(block) => {
-                                current = block.into_iter();
-                                started = true;
-                            }
-                            Err(TryRecvError::Empty | TryRecvError::Disconnected) => {
-                                if started {
-                                    underruns.fetch_add(1, Ordering::Relaxed);
-                                }
-                            }
-                        }
-                    }
-                    let value = current.next().unwrap_or(0.0).clamp(-1.0, 1.0);
-                    frame.fill(T::from_sample(value));
-                }
-            },
-            move |_| {
-                failed.store(true, Ordering::Relaxed);
-            },
-            Some(DEVICE_TIMEOUT),
-        )
-        .map_err(audio_error)
+    // SAFETY: all COM objects are created and released on this initialized thread.
+    // Endpoint strings and variants are copied before freeing Windows allocations.
+    // Only active capture endpoints are enumerated; no audio stream is started.
+    unsafe {
+        let enumerator: IMMDeviceEnumerator =
+            CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_INPROC_SERVER).map_err(os_error)?;
+        let devices = enumerator
+            .EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE)
+            .map_err(os_error)?;
+        for index in 0..devices.GetCount().map_err(os_error)? {
+            let read = || -> Result<Endpoint> {
+                let device = devices.Item(index).map_err(os_error)?;
+                let raw = device.GetId().map_err(os_error)?;
+                let id = raw
+                    .to_string()
+                    .map_err(|error| Error::new(error.to_string()));
+                CoTaskMemFree(Some(raw.0.cast()));
+                let id = id?;
+                let store = device.OpenPropertyStore(STGM_READ).map_err(os_error)?;
+                let mut value = store
+                    .GetValue(&PKEY_Device_FriendlyName)
+                    .map_err(os_error)?;
+                let raw = PropVariantToStringAlloc(&value);
+                let _ = PropVariantClear(&mut value);
+                let raw = raw.map_err(os_error)?;
+                let name = raw
+                    .to_string()
+                    .map_err(|error| Error::new(error.to_string()));
+                CoTaskMemFree(Some(raw.0.cast()));
+                Ok(Endpoint {
+                    apo_installed: installed(&id),
+                    id,
+                    name: name?,
+                })
+            };
+            match read() {
+                Ok(endpoint) => result.inputs.push(endpoint),
+                Err(error) => result.warnings.push(error.to_string()),
+            }
+        }
+    }
+    Ok(result)
 }
 
-/// Process one explicit microphone and one explicit render endpoint.
-/// The desktop owns this internal command's job and atomic processing-control file.
-/// Failure ends this stream without selecting another device or changing defaults.
+struct ClientCount(Arc<AtomicUsize>);
+impl Drop for ClientCount {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
 pub fn run(args: &[PathBuf]) -> Result<()> {
-    if args.len() != 5 {
-        return Err(Error::new("Invalid Windows audio worker arguments"));
+    if args.len() != 4 {
+        return Err(Error::new("Invalid Windows APO worker arguments"));
     }
-    let text = |i: usize| {
-        args[i]
-            .to_str()
-            .ok_or_else(|| Error::new("Invalid device identifier"))
-    };
-    let input_id: DeviceId = text(1)?.parse().map_err(audio_error)?;
-    let output_id: DeviceId = text(2)?.parse().map_err(audio_error)?;
-    if input_id == output_id {
-        return Err(Error::new("Input and output must be different endpoints"));
+    let endpoint = args[1]
+        .to_str()
+        .ok_or_else(|| Error::new("Invalid capture endpoint"))?;
+    if !installed(endpoint) {
+        return Err(Error::new(
+            "Attach Clearwave to this microphone using Setup, then reopen the recording application",
+        ));
     }
-    let host = cpal::default_host();
-    let input = host
-        .device_by_id(&input_id)
-        .ok_or_else(|| Error::new("Selected microphone is unavailable"))?;
-    let output = host
-        .device_by_id(&output_id)
-        .ok_or_else(|| Error::new("Selected output is unavailable"))?;
-    let input_config = configuration(&input, true)?;
-    let output_config = configuration(&output, false)?;
-    let model = crate::load(&args[0])?;
-    let selector = text(4)?;
-    let mut network = Network::new(
-        &model,
-        Backend::amd((!selector.is_empty()).then_some(selector))?,
-    )?;
-    let mut processor = StreamProcessor::new(model.profile)?;
-    let mut control = ProcessingControl::read(&args[3])?;
-    processor.set_echo_reduction(control.echo_reduction)?;
-    let (capture_send, capture_recv) = mpsc::sync_channel(AUDIO_QUEUE_BLOCKS);
-    let (render_send, render_recv) = mpsc::sync_channel(AUDIO_QUEUE_BLOCKS);
-    let failed = Arc::new(AtomicBool::new(false));
-    let underruns = Arc::new(AtomicU64::new(0));
-    macro_rules! capture {
-        ($t:ty) => {
-            input_stream::<$t>(&input, input_config.config(), capture_send, failed.clone())?
-        };
-    }
-    let capture = match input_config.sample_format() {
-        SampleFormat::F32 => capture!(f32),
-        SampleFormat::I16 => capture!(i16),
-        SampleFormat::I32 => capture!(i32),
-        _ => return Err(Error::new("Unsupported capture format")),
-    };
-    macro_rules! render {
-        ($t:ty) => {
-            output_stream::<$t>(
-                &output,
-                output_config.config(),
-                render_recv,
-                failed.clone(),
-                underruns.clone(),
-            )?
-        };
-    }
-    let render = match output_config.sample_format() {
-        SampleFormat::F32 => render!(f32),
-        SampleFormat::I16 => render!(i16),
-        SampleFormat::I32 => render!(i32),
-        _ => return Err(Error::new("Unsupported output format")),
-    };
-    // Playback starts with enough bounded silence for the model context.
-    // The extra hops absorb scheduling differences between the device threads.
-    // This is buffering, not fabricated signal for the denoised-output meter.
-    render_send
-        .send(vec![0.0; HOP * PLAYBACK_PRIME_HOPS])
-        .map_err(|_| Error::new("Audio output closed"))?;
-    render.play().map_err(audio_error)?;
-    capture.play().map_err(audio_error)?;
+    let name =
+        protocol::pipe_name(endpoint).ok_or_else(|| Error::new("Invalid capture endpoint GUID"))?;
+    let model = Arc::new(crate::load(&args[0])?);
+    let selector = args[3]
+        .to_str()
+        .ok_or_else(|| Error::new("Invalid adapter name"))?
+        .to_owned();
+    let clients = Arc::new(AtomicUsize::new(0));
+    let mut listener = Pipe::server(&name, true)?;
     eprintln!(
         "{}",
-        json!({"event":"started","adapter":network.backend.name(),"sample_rate":RATE})
+        json!({"event":"started", "transport":"capture-apo", "sample_rate":protocol::RATE, "latency_samples":protocol::LATENCY})
     );
-    let mut pending = VecDeque::new();
-    let mut levels = Levels::default();
-    let mut hops = 0u64;
-    let mut last_capture = Instant::now();
     loop {
-        if failed.load(Ordering::Relaxed) {
-            return Err(Error::new(
-                "Windows audio stopped or its bounded input queue overran. Restart with an available device.",
-            ));
+        if !listener.connected()? {
+            std::thread::sleep(POLL);
+            continue;
         }
-        let block = match capture_recv.recv_timeout(CAPTURE_POLL_INTERVAL) {
-            Ok(block) => {
-                last_capture = Instant::now();
-                block
+        let pipe = listener;
+        listener = Pipe::server(&name, false)?;
+        if clients.load(Ordering::Acquire) >= (clearwave_apo::pipe::MAX_CLIENTS - 1) as usize {
+            drop(pipe);
+            continue;
+        }
+        clients.fetch_add(1, Ordering::AcqRel);
+        let count = ClientCount(clients.clone());
+        let model = model.clone();
+        let selector = selector.clone();
+        let control = args[2].clone();
+        std::thread::Builder::new()
+            .name("windows-apo-model".into())
+            .spawn(move || {
+                let _count = count;
+                if let Err(error) = process_client(pipe, &model, &selector, &control) {
+                    eprintln!(
+                        "{}",
+                        json!({"event":"apo_client_stopped", "message":error.to_string()})
+                    );
+                }
+            })?;
+    }
+}
+fn process_client(
+    mut pipe: Pipe,
+    model: &crate::package::Model,
+    selector: &str,
+    control_path: &std::path::Path,
+) -> Result<()> {
+    let mut network = Network::new(
+        model,
+        Backend::amd((!selector.is_empty()).then_some(selector))?,
+    )?;
+    let mut processor = StreamProcessor::microphone(model.profile)?;
+    let stop = AtomicBool::new(false);
+    let mut expected = protocol::NO_AUDIO;
+    let mut emitted = 0u64;
+    let mut hops = 0usize;
+    let mut control = ProcessingControl::read(control_path)?;
+    let mut levels = Levels::default();
+    let mut pending = std::collections::VecDeque::new();
+    loop {
+        let mut session = pipe.session(&stop);
+        let input = Packet::read(&mut session)?;
+        if input.sequence == protocol::NO_AUDIO || input.sequence > u64::MAX - HOP as u64 {
+            return Err(Error::new("Invalid APO sequence"));
+        }
+        if input.sequence != expected {
+            network.reset();
+            processor = StreamProcessor::microphone(model.profile)?;
+            emitted = input.sequence;
+            pending.clear();
+        }
+        if hops.is_multiple_of(CONTROL_HOPS) {
+            control = ProcessingControl::read(control_path)?;
+        }
+        processor.set_echo_reduction(control.echo_reduction)?;
+        let output = processor.push(&input.samples, control.strength, &mut |features| {
+            network.step(features)
+        })?;
+        expected = input.sequence + HOP as u64;
+        let mut response = Packet::default();
+        pending.extend(output);
+        if pending.len() >= HOP {
+            response.sequence = emitted;
+            for value in &mut response.samples {
+                *value = pending
+                    .pop_front()
+                    .ok_or_else(|| Error::new("Incomplete APO output packet"))?;
             }
-            Err(mpsc::RecvTimeoutError::Timeout) if last_capture.elapsed() < DEVICE_TIMEOUT => {
-                continue;
-            }
-            Err(_) => return Err(Error::new("Microphone stopped delivering audio")),
-        };
-        pending.extend(block);
-        while pending.len() >= HOP {
-            if hops.is_multiple_of(CONTROL_INTERVAL_HOPS) {
-                control = ProcessingControl::read(&args[3])?;
-                processor.set_echo_reduction(control.echo_reduction)?;
-            }
-            let hop: Vec<_> = pending.drain(..HOP).collect();
-            let processed = processor.push(&hop, control.strength, &mut |c| network.step(c))?;
-            levels.add(&processed);
-            if !processed.is_empty() {
-                render_send
-                    .try_send(processed)
-                    .map_err(|_| Error::new("Processed audio output queue overran"))?;
-            }
-            hops += 1;
-            if hops.is_multiple_of(CONTROL_INTERVAL_HOPS) {
-                let (rms, peak) = levels.take();
-                eprintln!(
-                    "{}",
-                    json!({"event":"levels","output_rms":rms,"output_peak":peak,
-                    "underrun_samples":underruns.load(Ordering::Relaxed)})
-                );
-            }
+            emitted += HOP as u64;
+            levels.add(&response.samples);
+        }
+        response.write(&mut session)?;
+        hops += 1;
+        if hops.is_multiple_of(CONTROL_HOPS) {
+            let (rms, peak) = levels.take();
+            eprintln!(
+                "{}",
+                json!({"event":"levels", "output_rms":rms, "output_peak":peak})
+            );
         }
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn unavailable_endpoint_does_not_hide_healthy_microphones() {
-        let devices = [
-            Ok(Endpoint {
-                id: "first".into(),
-                name: "First".into(),
-            }),
-            Err(Error::new("Unavailable audio endpoint")),
-            Ok(Endpoint {
-                id: "second".into(),
-                name: "Second".into(),
-            }),
-        ];
-        let mut warnings = Vec::new();
-        let result = collect_endpoints(devices.into_iter(), &mut warnings);
-        assert_eq!(
-            result
-                .iter()
-                .map(|endpoint| endpoint.id.as_str())
-                .collect::<Vec<_>>(),
-            ["first", "second"]
-        );
-        assert_eq!(warnings, ["Unavailable audio endpoint"]);
+pub fn setup(endpoint: &str) -> Result<()> {
+    let guid =
+        protocol::endpoint_guid(endpoint).ok_or_else(|| Error::new("Choose a microphone first"))?;
+    let directory = std::env::current_exe()?
+        .parent()
+        .ok_or_else(|| Error::new("Missing application directory"))?
+        .to_path_buf();
+    let script = directory.join("setup-apo.ps1");
+    if !script.is_file() {
+        return Err(Error::new(
+            "setup-apo.ps1 is missing. Extract the complete Windows package.",
+        ));
     }
+    let parameters = wide(format!(
+        "-NoProfile -NoExit -File \"{}\" -Endpoint \"{}\" -Action Install",
+        script.display(),
+        guid
+    ));
+    // SAFETY: Windows owns the elevated setup process and its confirmation dialog.
+    // Arguments contain a validated GUID and a quoted Windows file path only.
+    // Setup runs explicitly from the button, never during discovery or capture.
+    unsafe {
+        use ::windows::{
+            Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL},
+            core::w,
+        };
+        let result = ShellExecuteW(
+            None,
+            w!("runas"),
+            w!("powershell.exe"),
+            PCWSTR(parameters.as_ptr()),
+            None,
+            SW_SHOWNORMAL,
+        );
+        if result.0 as isize <= 32 {
+            return Err(Error::new(
+                "Microphone setup was cancelled or could not start",
+            ));
+        }
+    }
+    Ok(())
 }

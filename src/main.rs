@@ -25,6 +25,7 @@ mod pe;
 mod pipewire;
 mod resident;
 mod storage;
+mod voice_balance;
 mod wav;
 #[cfg(windows)]
 #[allow(unsafe_code)]
@@ -94,6 +95,8 @@ Commands:
   wav-features INPUT.wav NEW_FEATURES.f32 [BUNDLE_DIRECTORY]
   denoise BUNDLE_DIRECTORY INPUT.wav NEW_OUTPUT.wav [STRENGTH] [ADAPTER_NAME_SUBSTRING] [ECHO_REDUCTION]
   denoise-cpu BUNDLE_DIRECTORY INPUT.wav NEW_OUTPUT.wav [STRENGTH] [ECHO_REDUCTION]
+  denoise-reference BUNDLE_DIRECTORY INPUT.wav NEW_OUTPUT.wav [STRENGTH] [ADAPTER_NAME_SUBSTRING] [ECHO_REDUCTION]
+  denoise-reference-cpu BUNDLE_DIRECTORY INPUT.wav NEW_OUTPUT.wav [STRENGTH] [ECHO_REDUCTION]
   audio-bypass INPUT.wav NEW_OUTPUT.wav
   stream BUNDLE_DIRECTORY [STRENGTH] [ADAPTER_NAME_SUBSTRING]
   stream-cpu BUNDLE_DIRECTORY [STRENGTH]
@@ -119,9 +122,9 @@ WAV commands process offline; live creates a temporary PipeWire virtual micropho
 Stream commands read mono 48000 Hz little-endian F32 from stdin and write it to stdout.
 Stream EOF flushes the tail; diagnostics go to stderr.
 Live preserves system defaults; make-default-mic explicitly selects its virtual input.
-On Windows, gui uses native Windows controls and WASAPI. Select a render endpoint
-for processed audio; other apps use its paired virtual-cable recording endpoint.
-PipeWire commands are Linux-only. Windows does not create a virtual audio driver.
+On Windows, gui controls a capture APO attached to the existing microphone.
+Run Setup once as administrator, then keep selecting the physical microphone in apps.
+No Windows playback stream or virtual microphone is created. PipeWire commands are Linux-only.
 "
 );
 
@@ -178,7 +181,7 @@ fn run(args: Vec<PathBuf>) -> Result<()> {
             Ok(())
         }
         #[cfg(windows)]
-        ("__windows-live", 6) => windows::audio::run(&args[1..]),
+        ("__windows-apo-worker", 5) => windows::audio::run(&args[1..]),
         ("licenses", 1) => {
             println!(
                 "Clearwave\n\n{}\nFlag artwork: flag-icons — https://github.com/lipis/flag-icons\n\n{}",
@@ -209,7 +212,7 @@ fn run(args: Vec<PathBuf>) -> Result<()> {
         ),
         #[cfg(windows)]
         ("live" | "make-default-mic", _) => Err(Error::new(
-            "PipeWire commands are Linux-only. Use the Windows interface to select a microphone and processed-audio output.",
+            "PipeWire commands are Linux-only. Use the Windows interface to attach the capture APO to your microphone.",
         )),
         ("wav-features", 3..=4) => wav_features(&args[1], &args[2], args.get(3)),
         ("audio-bypass", 3) => {
@@ -226,7 +229,12 @@ fn run(args: Vec<PathBuf>) -> Result<()> {
             );
             Ok(())
         }
-        ("denoise", 4..=7) | ("denoise-cpu", 4..=6) => denoise(&args, cmd == "denoise-cpu"),
+        ("denoise" | "denoise-reference", 4..=7)
+        | ("denoise-cpu" | "denoise-reference-cpu", 4..=6) => denoise(
+            &args,
+            cmd.ends_with("-cpu"),
+            cmd.starts_with("denoise-reference"),
+        ),
         ("stream", 2..=4) | ("stream-cpu", 2..=3) => stream_audio(&args, cmd == "stream-cpu"),
         ("inspect", 2) => {
             let m = load(&args[1])?;
@@ -342,7 +350,7 @@ fn wav_features(input: &Path, output: &Path, model: Option<&PathBuf>) -> Result<
     Ok(())
 }
 
-fn denoise(args: &[PathBuf], cpu: bool) -> Result<()> {
+fn denoise(args: &[PathBuf], cpu: bool, reference: bool) -> Result<()> {
     require_new_output(&args[3])?;
 
     let strength = processing_strength(args.get(4))?;
@@ -361,10 +369,13 @@ fn denoise(args: &[PathBuf], cpu: bool) -> Result<()> {
     let mut network = network::Network::new(&model, backend)?;
     let processor = audio::Processor::for_profile(model.profile)?;
     let start = std::time::Instant::now();
-    let output =
+    let mut output =
         processor.process_with_echo(&input.samples, strength, echo_reduction, |context| {
             network.step(context)
         })?;
+    if !reference {
+        voice_balance::VoiceBalance::default().process(&mut output)?;
+    }
     let elapsed = start.elapsed().as_secs_f64();
     wav::write_new(&args[3], &output)?;
     let rms =
@@ -375,6 +386,7 @@ fn denoise(args: &[PathBuf], cpu: bool) -> Result<()> {
             "sample_rate":audio::RATE,"samples":output.len(),"input_channels":input.channels,"output_channels":1,
             "frames":network.steps(),"initial_context_predictions":network.steps().min(audio::lookahead_hops(model.profile)),"adapter":network.backend.name(),"strength":strength,"echo_reduction":echo_reduction,
             "execution_mode":network.execution_mode(),"resident_parameter_bytes":network.resident_parameter_bytes(),
+            "voice_balance":if reference { "none" } else { voice_balance::PROFILE },
             "audio_seconds":output.len() as f64 / audio::RATE as f64,"elapsed_ms":elapsed*1000.0,
             "processing_seconds_per_audio_second":elapsed / (output.len() as f64 / audio::RATE as f64),
             "input_rms":rms(&input.samples),"output_rms":rms(&output),
@@ -410,10 +422,10 @@ fn stream_audio(args: &[PathBuf], cpu: bool) -> Result<()> {
     };
 
     let mut network = network::Network::new(&model, backend)?;
-    let mut processor = audio::StreamProcessor::new(model.profile)?;
+    let mut processor = audio::StreamProcessor::microphone(model.profile)?;
     eprintln!(
         "{}",
-        json!({"event":"stream_ready","adapter":network.backend.name(),"algorithmic_delay_samples":audio::algorithmic_delay_samples(model.profile),"sample_rate":audio::RATE})
+        json!({"event":"stream_ready","adapter":network.backend.name(),"algorithmic_delay_samples":audio::algorithmic_delay_samples(model.profile),"sample_rate":audio::RATE,"voice_balance":voice_balance::PROFILE})
     );
 
     let mut reader = std::io::stdin().lock();

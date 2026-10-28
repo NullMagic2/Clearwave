@@ -1,77 +1,44 @@
 # Native Windows build
 
-The Windows frontend uses Windows controls through windows-rs, Segoe UI,
-common-controls theming, per-monitor DPI awareness, and the system folder picker.
-The window and control surfaces use the native system dialog colors. The audio
-path uses WASAPI through CPAL. GTK, PipeWire, and Linux command-line audio tools
-are not used on Windows.
+Clearwave uses native windows-rs controls and a capture Audio Processing Object.
+There is no Windows playback-output selector or virtual-cable requirement.
+GTK and PipeWire are used only on Linux.
 
-## Requirements
+## Build
 
-- 64-bit Windows 10 or 11, Rust/Cargo 1.88 or newer, and Visual Studio Build Tools
-  with the C++ desktop workload and Windows SDK. Run from a Developer PowerShell
-  so the linker and `rc.exe` resource compiler are available.
-- An AMD graphics device with a working Vulkan driver.
-- A locally supplied supported model. No NVIDIA files are included.
-- A microphone and output endpoint supporting 48 kHz PCM. If unavailable, choose
-  48 kHz in Windows Sound settings; Clearwave reports unsupported formats rather
-  than substituting another processing model.
-
-Fetch dependencies once with `cargo fetch --locked`, then run:
+Use 64-bit Windows 10/11, Rust/Cargo 1.88 or newer, and Visual Studio Build Tools
+with the desktop C++ workload and Windows SDK. In Developer PowerShell:
 
 ```powershell
-./build.ps1
-# Or remove intermediate build output after success:
-./clean_build.ps1
-./bin/clearwave.exe
+cargo fetch --locked
+.\build.ps1
 ```
 
-The clean build preserves sources and replaces `bin/clearwave.exe` only after a
-successful compilation. `CARGO` can select another Cargo executable. The packaged
-GUI suppresses the console window; omit `--features windows-gui` in a manual
-Cargo build when using the command-line tools in a terminal.
+`bin/` receives `clearwave.exe` and `clearwave_apo.dll`. `clean_build.ps1` builds
+with an isolated temporary directory and removes intermediates. Package both
+binaries with `packaging/windows/setup-apo.ps1` using
+`python packaging/package_windows.py`. The executable embeds the common-controls
+manifest; the APO DLL deliberately does not embed an application manifest.
+GNU cross-compilation is also supported with MinGW-w64 and windres.
 
-A Linux cross-build can use the Rust `x86_64-pc-windows-gnu` standard library and
-MinGW-w64 linker/resource compiler:
+## Microphone processing
 
-```sh
-cargo build --locked --release --target x86_64-pc-windows-gnu --features windows-gui
-```
+This is an unsigned **APO development preview**. Read `WINDOWS-APO.md` in the
+archive (or `docs/WINDOWS_APO.md` in source) before setup. It describes installation,
+removal, 48 kHz format requirements, 120 ms latency, fallback and deployment limits.
+The setup button requests elevation to attach to the selected existing microphone.
+Applications continue selecting that original microphone. No kernel driver or
+virtual microphone is created, and microphone audio is never sent to speakers.
 
-`WINDRES` can select a different GNU resource compiler. The GNU cross-build and
-Windows-target Clippy passed locally. All 39 Windows-target
-tests passed under Wine 11.20, including native controls, model-folder preference
-overwrite, failed-save close behavior, keyboard order, and window/font disposal.
-The language regression drives the embedded Windows combo with arrow keys,
-checks translation and saved preferences for all five languages, and verifies
-that the drop-down has room to display the choices.
-Visual inspection in the Windows 11 Qemu Lightning VM confirmed matching window
-and control surfaces, all five language choices in the expanded menu, and a
-successful switch to Brazilian Portuguese before restoring English.
-The Linux suite also passed all 42 tests. These compatibility checks do not
-establish hardware audio behavior on Windows. The included Windows CI workflow
-builds MSVC and runs the shared and native tests when it runs on GitHub.
+A protected audio host may reject the unsigned DLL. An existing OEM mode/legacy
+APO or registry protection can also prevent generic attachment. Production signing,
+OEM integration and native Windows host verification remain outstanding; the
+package does not change system security settings to work around them.
 
-## Routing and settings
-
-Select the microphone and an explicit **Processed audio output**, then click
-**Start**. To use it in calling or recording programs, select an already installed
-virtual audio cable's playback endpoint as Clearwave's output and that cable's
-paired recording endpoint in the other programs. Clearwave does not install an
-audio driver, create a Windows recording endpoint, or change system defaults.
-Choosing speakers sends the processed microphone to the speakers, so choose the
-intended destination carefully to avoid acoustic feedback.
-
-Preferences save automatically to `%LOCALAPPDATA%\Clearwave\runtime\desktop.json`.
-They include the model folder, stable input/output IDs, AMD adapter, language, and
-noise-removal strength. `gui --settings PATH` selects another preferences file.
-Settings are compatible with the Linux schema; platform-specific device IDs must
-be selected again when moving settings between operating systems.
-
-Discovery and audio processing run outside the UI thread. The native folder
-picker and audio worker run in owned subprocesses attached to Windows jobs, so
-Cancel, Stop, closing the window, or process termination can release them without
-waiting for a stuck dialog or GPU call on the message thread.
+Model discovery, GPU work and the audio transport run outside the desktop thread.
+Stop or closing Clearwave terminates its owned worker; the APO falls back to
+aligned dry audio. Closing does not uninstall the effect. Disable Clearwave using
+its setup script's Uninstall action to remove the persistent capture attachment.
 
 ## Importing the model
 

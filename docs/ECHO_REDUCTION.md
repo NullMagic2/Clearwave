@@ -21,11 +21,19 @@ a five-hop prediction delay (50 ms). The predictor uses recursive weighted least
 squares, a forgetting factor of 0.995, and a causal smoothed input-power estimate.
 The delay protects short correlations but does not guarantee speech preservation.
 
-Prediction uses raw spectra in chronological order. The predicted component is
-subtracted before applying the existing denoiser mask; model features and hidden
-states are unchanged. The slider scales this subtraction, not overall volume.
-Per-bin subtraction is capped at 70% of observed magnitude; a spectral ceiling
-prevents amplification. Invalid covariance state resets the affected bin.
+Prediction uses raw spectra in chronological order; model features and hidden
+states are unchanged. The predicted residual magnitude produces an attenuation
+mask capped at 70%. The mask is averaged over three frequency bins and smoothed
+between frames (0.75 previous / 0.25 current), then scaled by the echo slider and
+low-voice protection. The original complex spectrum is multiplied by a real gain
+between zero and one, preserving its phase. This replaces direct complex
+subtraction, which could rotate noise and speech bins independently across frames.
+It prevents per-bin amplification, not every possible change in reconstructed
+waveform peaks. Invalid covariance state resets the affected bin.
+Starting with 0.7.1-dev.5, cancellation is additionally weighted to 25% below
+250 Hz, rising to full strength at 600 Hz, to limit removal of sustained low
+voice tones. Default output also receives the shared
+[microphone voicing stage](VOICE_BALANCE.md) after reconstruction.
 
 Linux and Windows run this stage in their existing audio worker, outside the UI
 thread and device callbacks. It reuses the existing 40 ms transform, 10 ms hop,
@@ -50,6 +58,6 @@ argument keeps echo reduction off. Live desktop control files store
 
 Checks cover exact bypass, settings/control compatibility and bounds, an actual
 Windows trackbar message and saved preference, streaming/offline agreement with
-partial final chunks, finite output, and prediction of a synthetic delayed
-reflection. They do not establish perceptual quality or performance on every
+partial final chunks, finite output, prediction of a synthetic delayed
+reflection, phase preservation on changing complex input, and bounded per-bin gain. They do not establish perceptual quality or performance on every
 microphone. No claim of NVIDIA dereverberation equivalence is made.

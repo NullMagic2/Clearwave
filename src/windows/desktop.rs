@@ -42,7 +42,7 @@ use std::{
 };
 
 const SOURCE: u16 = 101;
-const OUTPUT: u16 = 102;
+const SETUP_APO: u16 = 102;
 const REFRESH: u16 = 103;
 const STRENGTH: u16 = 104;
 const PERCENT: u16 = 105;
@@ -54,7 +54,6 @@ const STATUS: u16 = 111;
 const ROUTE_HINT: u16 = 112;
 const SUBTITLE: u16 = 121;
 const SOURCE_LABEL: u16 = 130;
-const OUTPUT_LABEL: u16 = 131;
 const STRENGTH_LABEL: u16 = 132;
 const SIGNAL_LABEL: u16 = 133;
 const BUNDLE: u16 = 201;
@@ -130,7 +129,6 @@ struct App {
     path: PathBuf,
     can_save: bool,
     inputs: Vec<super::audio::Endpoint>,
-    outputs: Vec<super::audio::Endpoint>,
     adapters: Vec<String>,
     devices_task: Option<super::task::JsonTask>,
     adapters_task: Option<super::task::JsonTask>,
@@ -322,7 +320,6 @@ impl App {
             fonts: Vec::new(),
             flags: OwnedImages::default(),
             inputs: Vec::new(),
-            outputs: Vec::new(),
             adapters: Vec::new(),
             devices_task: None,
             adapters_task: None,
@@ -339,7 +336,6 @@ impl App {
         for id in [
             SUBTITLE,
             SOURCE_LABEL,
-            OUTPUT_LABEL,
             STRENGTH_LABEL,
             SIGNAL_LABEL,
             PERCENT,
@@ -350,18 +346,16 @@ impl App {
         ] {
             app.controls.insert(id, child(main, w!("STATIC"), id, 0)?);
         }
-        for id in [SOURCE, OUTPUT] {
-            app.controls.insert(
-                id,
-                child(
-                    main,
-                    w!("COMBOBOX"),
-                    id,
-                    CBS_DROPDOWNLIST as u32 | WS_TABSTOP.0 | WS_VSCROLL.0,
-                )?,
-            );
-        }
-        for id in [REFRESH, START, SETTINGS] {
+        app.controls.insert(
+            SOURCE,
+            child(
+                main,
+                w!("COMBOBOX"),
+                SOURCE,
+                CBS_DROPDOWNLIST as u32 | WS_TABSTOP.0 | WS_VSCROLL.0,
+            )?,
+        );
+        for id in [REFRESH, START, SETTINGS, SETUP_APO] {
             app.controls
                 .insert(id, child(main, w!("BUTTON"), id, WS_TABSTOP.0)?);
         }
@@ -433,7 +427,7 @@ impl App {
         app.order_tab_stops(
             main,
             &[
-                LANGUAGE, SOURCE, REFRESH, OUTPUT, STRENGTH, ECHO, SETTINGS, START,
+                LANGUAGE, SOURCE, REFRESH, SETUP_APO, STRENGTH, ECHO, SETTINGS, START,
             ],
         )?;
         app.order_tab_stops(
@@ -626,9 +620,8 @@ impl App {
             let subtitle_top = MARGIN + CONTROL_HEIGHT + GAP;
             let source_top = subtitle_top + LINE_HEIGHT + GAP * 2;
             let source_control = source_top + LINE_HEIGHT + GAP / 2;
-            let output_top = source_control + CONTROL_HEIGHT + MARGIN;
-            let output_control = output_top + LINE_HEIGHT + GAP / 2;
-            let hint_top = output_control + CONTROL_HEIGHT + GAP;
+            let setup_top = source_control + CONTROL_HEIGHT + GAP;
+            let hint_top = setup_top + CONTROL_HEIGHT + GAP;
             let strength_top = hint_top + LINE_HEIGHT * 2 + GAP;
             let strength_control = strength_top + LINE_HEIGHT + GAP / 2;
             let echo_top = strength_control + CONTROL_HEIGHT + MARGIN;
@@ -661,14 +654,7 @@ impl App {
                 REFRESH_WIDTH,
                 CONTROL_HEIGHT,
             );
-            place(OUTPUT_LABEL, MARGIN, output_top, content_width, LINE_HEIGHT);
-            place(
-                OUTPUT,
-                MARGIN,
-                output_control,
-                content_width,
-                DROPDOWN_HEIGHT,
-            );
+            place(SETUP_APO, MARGIN, setup_top, content_width, CONTROL_HEIGHT);
             place(ROUTE_HINT, MARGIN, hint_top, content_width, LINE_HEIGHT * 2);
             place(
                 STRENGTH_LABEL,
@@ -793,7 +779,7 @@ impl App {
     fn translate(&mut self) {
         for (id, key) in [
             (SOURCE_LABEL, Text::Microphone),
-            (OUTPUT_LABEL, Text::WindowsOutput),
+            (SETUP_APO, Text::ApoSetup),
             (STRENGTH_LABEL, Text::Removal),
             (SIGNAL_LABEL, Text::Signal),
             (SETTINGS, Text::Settings),
@@ -858,7 +844,7 @@ impl App {
         // EnableWindow changes only UI interaction state on the owning thread.
         // Worker state arrives through channels and never touches these handles.
         unsafe {
-            for id in [SOURCE, OUTPUT, BUNDLE, ADAPTER] {
+            for id in [SOURCE, SETUP_APO, BUNDLE, ADAPTER] {
                 let _ = EnableWindow(self.control(id), idle);
             }
             let _ = EnableWindow(self.control(REFRESH), idle && !self.discovering());
@@ -949,8 +935,8 @@ impl App {
         if active.source.is_empty() {
             return Err(Error::new(self.text(Text::ChooseSource)));
         }
-        if active.render.is_empty() {
-            return Err(Error::new(self.text(Text::ChooseOutput)));
+        if !super::audio::installed(&active.source) {
+            return Err(Error::new(self.text(Text::ApoSetupRequired)));
         }
         let control = self
             .path
@@ -958,8 +944,8 @@ impl App {
         ProcessingControl::write(&control, active)?;
         let mut command = Command::new(std::env::current_exe()?);
         command
-            .arg("__windows-live")
-            .args([&active.bundle, &active.source, &active.render])
+            .arg("__windows-apo-worker")
+            .args([&active.bundle, &active.source])
             .arg(&control)
             .arg(&active.adapter)
             .stdin(Stdio::null())
@@ -1057,7 +1043,6 @@ impl App {
                             self.message = devices.warnings.join("; ");
                         }
                         self.inputs = devices.inputs;
-                        self.outputs = devices.outputs;
                         let input = self
                             .inputs
                             .iter()
@@ -1065,13 +1050,7 @@ impl App {
                             .or_else(|| (!self.inputs.is_empty()).then_some(0));
                         self.preferences.active.source =
                             input.map(|i| self.inputs[i].id.clone()).unwrap_or_default();
-                        let output = self
-                            .outputs
-                            .iter()
-                            .position(|d| d.id == self.preferences.active.render);
-                        if output.is_none() {
-                            self.preferences.active.render.clear();
-                        }
+                        self.preferences.active.render.clear();
                         fill_combo(
                             self.control(SOURCE),
                             &self
@@ -1080,15 +1059,6 @@ impl App {
                                 .map(|d| d.name.clone())
                                 .collect::<Vec<_>>(),
                             input,
-                        );
-                        fill_combo(
-                            self.control(OUTPUT),
-                            &self
-                                .outputs
-                                .iter()
-                                .map(|d| d.name.clone())
-                                .collect::<Vec<_>>(),
-                            output,
                         );
                     }
                     Err(error) => self.message = format!("Audio device discovery: {error}"),
@@ -1122,7 +1092,13 @@ impl App {
                     match event["event"].as_str() {
                         Some("started") => {
                             self.running = true;
-                            self.message.clear();
+                            self.message = self.text(Text::ApoReady).into();
+                        }
+                        Some("apo_client_stopped") => {
+                            self.message = event["message"]
+                                .as_str()
+                                .unwrap_or("APO worker disconnected")
+                                .into();
                         }
                         Some("levels") => {
                             if let (Some(rms), Some(peak)) =
@@ -1132,6 +1108,7 @@ impl App {
                                 && rms >= 0.0
                                 && peak >= 0.0
                             {
+                                self.message.clear();
                                 self.levels_at = Some(Instant::now());
                                 let db = 20.0 * rms.max(LOG_FLOOR).log10();
                                 send(
@@ -1204,6 +1181,11 @@ impl App {
                     self.start()?;
                 }
             }
+            SETUP_APO => {
+                if self.live.is_none() {
+                    super::audio::setup(&self.preferences.active.source)?;
+                }
+            }
             REFRESH => self.refresh(),
             SETTINGS => {
                 // SAFETY: the settings HWND is owned and created on this UI thread.
@@ -1222,17 +1204,12 @@ impl App {
                 self.save(true)?;
                 self.message = self.text(Text::SettingsSaved).to_owned();
             }
-            SOURCE | OUTPUT | ADAPTER | LANGUAGE if notification == CBN_SELCHANGE as u16 => {
+            SOURCE | ADAPTER | LANGUAGE if notification == CBN_SELCHANGE as u16 => {
                 if let Some(index) = selected(self.control(id)) {
                     match id {
                         SOURCE => {
                             if let Some(d) = self.inputs.get(index) {
                                 self.preferences.active.source = d.id.clone();
-                            }
-                        }
-                        OUTPUT => {
-                            if let Some(d) = self.outputs.get(index) {
-                                self.preferences.active.render = d.id.clone();
                             }
                         }
                         ADAPTER => {
@@ -1604,7 +1581,7 @@ mod tests {
             assert!(IsWindow(Some(settings)).as_bool());
             assert!(take_quit_message());
             let expected = [
-                LANGUAGE, SOURCE, REFRESH, OUTPUT, STRENGTH, ECHO, SETTINGS, START,
+                LANGUAGE, SOURCE, REFRESH, SETUP_APO, STRENGTH, ECHO, SETTINGS, START,
             ];
             let mut previous = None;
             for id in expected {

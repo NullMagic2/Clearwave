@@ -9,7 +9,7 @@ establishing the report's exact cause.
   results no longer wait for graphics enumeration. Each discovery task has a
   15-second deadline and polls cancellation without blocking the UI thread.
 - Endpoint ID/name failures become warnings while healthy endpoints remain in
-  the list. Failure to enumerate one direction preserves the other direction.
+  the list. Only capture endpoints are enumerated; playback routing has been removed.
 - Closing a kill-on-close Windows job, terminating its process, waiting, and
   deleting its control file all happen on a reaper thread. Discovery processes run
   below normal CPU priority; audio workers retain normal priority. App shutdown cancels pending discovery tasks.
@@ -23,3 +23,7 @@ helper deadlines, cancellation, failed-save close, and repeated native window
 lifetimes. Windows-target Clippy passes. Wine compatibility checks cannot
 establish native Windows 10 driver behavior; the friend's retest remains needed.
 The GPU requirements and audio processing model are unchanged.
+
+The capture-APO worker is owned by the same kill-on-close job. Its IPC thread is
+separate from the audio callback and DLL teardown signals cancellation without
+joining on the audio thread. See [capture APO](WINDOWS_APO.md) for current limits.

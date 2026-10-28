@@ -356,6 +356,7 @@ pub struct StreamProcessor {
     echo: crate::dereverb::EchoReducer,
     conditioner: Option<Conditioner>,
     gains: VecDeque<f32>,
+    voice_balance: Option<crate::voice_balance::VoiceBalance>,
 }
 impl StreamProcessor {
     pub fn new(profile: ModelProfile) -> Result<Self> {
@@ -377,7 +378,13 @@ impl StreamProcessor {
             echo: crate::dereverb::EchoReducer::default(),
             conditioner: (profile == ModelProfile::Broadcast23).then(Conditioner::default),
             gains: VecDeque::with_capacity(CONTEXT),
+            voice_balance: None,
         })
+    }
+    pub fn microphone(profile: ModelProfile) -> Result<Self> {
+        let mut processor = Self::new(profile)?;
+        processor.voice_balance = Some(crate::voice_balance::VoiceBalance::default());
+        Ok(processor)
     }
     pub fn set_echo_reduction(&mut self, amount: f32) -> Result<()> {
         self.echo.set_amount(amount)
@@ -541,6 +548,9 @@ impl StreamProcessor {
             for value in &mut output {
                 *value *= gain;
             }
+            if let Some(balance) = &mut self.voice_balance {
+                balance.process(&mut output)?;
+            }
             self.emitted += count as u64;
         } else if let Some(conditioner) = &mut self.conditioner {
             conditioner.observe(&[0.0; HOP]);
@@ -582,6 +592,42 @@ fn check_samples(samples: &[f32]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn balanced_microphone_stream_matches_offline_with_echo_and_partial_tail() {
+        let samples: Vec<_> = (0..HOP * 30 + 13)
+            .map(|i| {
+                let time = i as f32 / RATE as f32;
+                0.6 * (std::f32::consts::TAU * 180.0 * time).sin()
+                    + 0.6 * (std::f32::consts::TAU * 1000.0 * time).sin()
+            })
+            .collect();
+        for profile in [ModelProfile::RtxVoice, ModelProfile::Broadcast23] {
+            let mut predict = |_: &[f32]| Ok(vec![0.1; GAINS]);
+            let mut expected = Processor::for_profile(profile)
+                .unwrap()
+                .process_with_echo(&samples, 1.0, 0.6, &mut predict)
+                .unwrap();
+            crate::voice_balance::VoiceBalance::default()
+                .process(&mut expected)
+                .unwrap();
+            let mut stream = StreamProcessor::microphone(profile).unwrap();
+            stream.set_echo_reduction(0.6).unwrap();
+            let mut actual = Vec::new();
+            for chunk in samples.chunks(173) {
+                actual.extend(stream.push(chunk, 1.0, &mut predict).unwrap());
+            }
+            actual.extend(stream.finish(1.0, &mut predict).unwrap());
+            assert_eq!(actual.len(), samples.len());
+            assert!(actual.iter().all(|v| v.is_finite() && v.abs() <= 1.0));
+            assert!(
+                actual
+                    .iter()
+                    .zip(expected)
+                    .all(|(a, b)| (a - b).abs() < 1e-5)
+            );
+        }
+    }
+
     #[test]
     fn broadcast_masks_target_incoming_spectra_with_causal_history() {
         let mut queue = FrameContext::new(ModelProfile::Broadcast23);

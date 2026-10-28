@@ -10,11 +10,13 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Cargo failed with exit code $LASTEXITCODE" }
 
     $binaryDirectory = Join-Path $PSScriptRoot 'bin'
-    $temporaryBinary = Join-Path $binaryDirectory '.clearwave.new.exe'
     New-Item -ItemType Directory -Force $binaryDirectory | Out-Null
-    Copy-Item (Join-Path $BuildDirectory 'release/clearwave.exe') $temporaryBinary -Force
-    Move-Item $temporaryBinary (Join-Path $binaryDirectory 'clearwave.exe') -Force
-    Write-Output "Built: $(Join-Path $binaryDirectory 'clearwave.exe')"
+    foreach ($name in @('clearwave.exe', 'clearwave_apo.dll')) {
+        $temporaryBinary = Join-Path $binaryDirectory ('.new-' + $name)
+        Copy-Item (Join-Path $BuildDirectory ('release/' + $name)) $temporaryBinary -Force
+        Move-Item $temporaryBinary (Join-Path $binaryDirectory $name) -Force
+        Write-Output "Built: $(Join-Path $binaryDirectory $name)"
+    }
 } finally {
     Pop-Location
 }

@@ -1,64 +1,58 @@
 {
-  "application": "Clearwave",
-  "version": "0.7.1-dev.4",
-  "linux_unit_tests": {
-    "passed": 54,
+  "version": "0.7.1-dev.6",
+  "linux_tests": {
+    "passed": 64,
     "failed": 0
   },
   "windows_wine_tests": {
-    "passed": 54,
+    "passed": 65,
     "failed": 0,
     "ignored_opt_in_preview": 1
   },
-  "linux_and_windows_clippy_warnings_denied": true,
-  "format_check_passed": true,
-  "amd_operator_graph_checks_passed": 30,
+  "linux_windows_clippy_passed": true,
   "maximum_glibc_symbol": "2.39",
-  "linux_binary_sha256": "9eff55822d78021bee58909442fb3cc360791965e291a4493eb7dbd6599483c1",
-  "windows_binary_sha256": "fe141936feda5e914983134b0e2ca09b92c7f797f32ee3a2eaf8dd2861acdd9b",
-  "broadcast_comparisons": "docs/broadcast-comparison.json",
-  "reference_scope": "NVIDIA Broadcast 2.3 runtime on AMD compatibility stack; no native NVIDIA hardware reference",
-  "physical_windows_audio_verified": false,
-  "full_distribution_installations_tested": false,
-  "native_nvidia_hardware_equivalence_established": false,
+  "voice_balance_profile": "balanced-v1",
   "packages": {
-    "clearwave_0.7.1-dev.4-1+debian13_amd64.deb": {
-      "sha256_verified": true,
-      "same_compatible_executable": true,
-      "root_ownership": true,
-      "style_guide_absent": true,
-      "nvidia_files_absent": true,
-      "readme_and_dummy_screenshot_match_source": true,
-      "rust_dependency_notices": 146
+    "clearwave_0.7.1-dev.6-1+debian13_amd64.deb": {
+      "sha256": "8f2f02e7b6626d4ff7831a52ff5055cf42bb9665cf6f9fa9cd5921adc87d6d24",
+      "binary_matches": true,
+      "cli_smoke_test": true,
+      "nvidia_assets_absent": true,
+      "private_audio_absent": true,
+      "style_guide_absent": true
     },
-    "clearwave_0.7.1-dev.4-1+ubuntu24.04_amd64.deb": {
-      "sha256_verified": true,
-      "same_compatible_executable": true,
-      "root_ownership": true,
-      "style_guide_absent": true,
-      "nvidia_files_absent": true,
-      "readme_and_dummy_screenshot_match_source": true,
-      "rust_dependency_notices": 146
+    "clearwave_0.7.1-dev.6-1+ubuntu24.04_amd64.deb": {
+      "sha256": "23493da9d10ad07c7cfee5878eb8fb5e5319031c47a4d0ee38646310224b5c84",
+      "binary_matches": true,
+      "cli_smoke_test": true,
+      "nvidia_assets_absent": true,
+      "private_audio_absent": true,
+      "style_guide_absent": true
     },
-    "clearwave_0.7.1-dev.4-1+mint22_amd64.deb": {
-      "sha256_verified": true,
-      "same_compatible_executable": true,
-      "root_ownership": true,
-      "style_guide_absent": true,
-      "nvidia_files_absent": true,
-      "readme_and_dummy_screenshot_match_source": true,
-      "rust_dependency_notices": 146
+    "clearwave_0.7.1-dev.6-1+mint22_amd64.deb": {
+      "sha256": "759e63ded3df2a00884d342a297ff95268921660e86d055e2f61925c03b8e9ba",
+      "binary_matches": true,
+      "cli_smoke_test": true,
+      "nvidia_assets_absent": true,
+      "private_audio_absent": true,
+      "style_guide_absent": true
     }
   },
   "windows_package": {
-    "version": "0.7.1-dev.4",
+    "version": "0.7.1-dev.6",
     "architecture": "x86_64",
     "target": "x86_64-pc-windows-gnu",
-    "filename": "clearwave-0.7.1-dev.4-windows-x86_64.zip",
-    "sha256": "8d6f0b8cf7dc772aac6d35b7ddfaf0d1dd3a67ef7bb3fa067b8c0e21dcf34202",
-    "binary_sha256": "fe141936feda5e914983134b0e2ca09b92c7f797f32ee3a2eaf8dd2861acdd9b",
-    "rust_dependency_notices": 116,
+    "filename": "clearwave-0.7.1-dev.6-windows-x86_64.zip",
+    "sha256": "11f43bc4c3a78f2f939a02b1c7b52af8adeb67f873f0690968958c66fceebf79",
+    "windows_audio": "capture-apo-preview",
+    "native_audio_host_verified": false,
+    "apo_sha256": "f323fe025e097a11ab85a9d7a0224617dfb174ec39f0275e5550fbaca3242c20",
+    "binary_sha256": "6ae0cdefc93b28b920dc7622fa63e4b7ec89408169a40c49842c9cda82245be6",
+    "rust_dependency_notices": 114,
     "nvidia_assets_included": false,
     "style_guide_included": false
-  }
+  },
+  "physical_windows_audio_verified": false,
+  "windows_apo_validation": "windows-apo-validation.json",
+  "scope": "Package and code checks do not establish subjective speech quality, native Windows APO loading, or general NVIDIA output equivalence."
 }

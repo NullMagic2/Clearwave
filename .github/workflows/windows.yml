@@ -23,6 +23,9 @@ jobs:
         run: cargo clippy --locked --offline --all-targets -- -D warnings
       - name: Test shared engine and Windows integration
         run: cargo test --locked --offline -- --test-threads=1
+      - name: Check APO setup recovery
+        shell: pwsh
+        run: ./packaging/windows/test-setup.ps1
       - name: Build native interface
         shell: pwsh
         run: ./clean_build.ps1

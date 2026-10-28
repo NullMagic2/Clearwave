@@ -35,10 +35,10 @@ command-line interface. Prefer descriptive domain names and plain error messages
 - Keep audio and model processing local. Do not change default audio devices,
   install drivers, or enable background services as a side effect of inspection.
 - Live capture requires an explicit source. Linux uses temporary PipeWire nodes;
-  Windows uses WASAPI and an explicitly selected render endpoint. Clean up owned
+  Windows uses the selected microphone’s capture APO and a separate GPU worker. Clean up owned
   subprocesses and preserve defaults unless the user explicitly requests a change.
   Linux virtual microphone descriptions append ` – Clearwave` using an en dash.
-  Windows does not claim to create or rename an external virtual-cable driver.
+  Windows must never route the microphone to speakers or require a virtual cable.
 
 ## GPU code
 

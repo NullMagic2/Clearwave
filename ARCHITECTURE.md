@@ -6,10 +6,12 @@ exports named tensors, and processes WAV recordings through a connected network
 on AMD Vulkan hardware. Its waveform adapter runs on the CPU. Vendor audio-output
 parity, speech quality, and device latency remain unverified. A live PipeWire
 controller connects the streaming adapter to a temporary virtual microphone.
-Windows uses native windows-rs controls and WASAPI endpoints; it sends processed
-audio to an explicitly selected render endpoint instead of using PipeWire. A
-Windows virtual audio cable must be installed separately to provide a recording
-endpoint for other applications.
+Windows uses native windows-rs controls and an in-process capture APO. A bounded
+local pipe carries microphone samples to a separate GPU worker and returns them
+to the original capture endpoint. There is no speaker-output or virtual-cable
+route. This is a development implementation: native audio-host loading, OEM
+compatibility, production signing and installation remain unverified. See
+[Windows APO](docs/WINDOWS_APO.md).
 
 ## Components
 
@@ -33,11 +35,13 @@ endpoint for other applications.
 | `fft.rs` | Mixed-radix complex transform and normalized inverse | Implemented for factors 2/3/5 |
 | `audio.rs` | Model-specific windows, mask alignment/strength, overlap reconstruction, bounded streaming | Implemented; boundary conventions documented |
 | `conditioning.rs` | Broadcast block peaks, activity gating, input normalization and matched output compensation | Implemented |
+| `voice_balance.rs` | Shared final microphone EQ and soft peak protection, outside the neural model | Implemented; automatic in desktop output |
 | `pipewire.rs` | Source enumeration, temporary virtual microphone, stream lifecycle, latency requests | Implemented |
 | `desktop.rs` | Native GTK3 window/settings dialog, device selection, child lifecycle, a measured denoised-signal bar | Implemented |
 | `i18n.rs`, `ui/flags/` | Five UI languages and embedded country flags | Implemented |
 | `windows/desktop.rs` | Native Windows controls, DPI/fonts/flag resources, bounded worker events | Implemented; physical Windows validation pending |
-| `windows/audio.rs` | WASAPI capture/render via CPAL, bounded PCM queues, shared AMD processor | Implemented; physical Windows validation pending |
+| `windows/audio.rs` | Capture endpoint discovery, local APO pipe server, shared AMD worker | Implemented; physical Windows validation pending |
+| `apo/` | COM capture effect, bounded realtime bridge, local pipe protocol | Development preview; native host validation pending |
 | `windows/mod.rs` | Thread-bound COM, folder picker helper, owned Windows jobs, atomic preference replacement | Implemented |
 | `storage.rs` | Bounded file reads with limits on bytes actually read | Implemented |
 | `controls.rs` | Validated local preferences, atomic live strength updates, RMS/peak aggregation | Implemented |
@@ -47,6 +51,15 @@ resident GPU upload transpose it once to the execution matrix layout. This
 conversion is local to inference; export preserves original stored values.
 
 ## Data path
+
+Microphone output applies the fixed `balanced-v1` voicing profile after waveform
+reconstruction and input-gain compensation. A +2.5 dB peaking EQ at 180 Hz adds
+voice body, with near-unity DC/treble response and a soft guard above 0.98 full
+scale. Linux, Windows and normal offline denoising share this implementation.
+There is no additional UI control or preference. Low-frequency echo prediction
+is reduced to protect sustained voice harmonics. Reference commands omit the
+final EQ/guard; neural features, weights and masks are unchanged.
+See [voice balance](docs/VOICE_BALANCE.md) for scope and validation.
 
 The preferred path loads a Safetensors file directly into named F32 tensors and
 the compiled graph. The diagram below shows the optional original-package import
@@ -264,25 +277,18 @@ per-monitor DPI. Widget/GDI access and the message pump stay on one thread.
 Device discovery communicates through bounded channels. Model loading and Vulkan
 processing run in a separate owned audio process.
 
-The Windows audio process uses CPAL's WASAPI backend with explicit stable input
-and output endpoint IDs. Callbacks downmix captured channels or copy processed
-mono samples into output channels using bounded queues; model inference and
-control-file reads occur outside those callbacks. Unsupported 48 kHz formats,
-queue overflow, endpoint loss, and processing errors stop the worker explicitly.
-No fallback model or default-device routing is substituted.
+The Windows capture APO and worker communicate through bounded local pipe
+packets. The existing microphone keeps its name; no playback endpoint or virtual
+cable is used. The APO callback never waits for inference and uses timestamped dry
+fallback when the worker cannot supply an on-time result. Its fixed 120 ms delay
+is reported to the audio host. See [Windows APO](docs/WINDOWS_APO.md) for supported
+formats, setup/removal, signing limits and native-host validation gaps.
 
-The folder chooser runs in a separate COM STA process. Its bounded JSON response
-fits within the redirected pipe even before the UI reaps the process. Folder
-picker and audio children belong to kill-on-close Windows jobs. Closing a job
-stops owned descendants, while a background reaper waits and removes live control
-files without blocking the UI. Model-folder validation remains outside the
-message pump. Preferences use the shared schema and atomic replacement at
-`%LOCALAPPDATA%\Clearwave\runtime\desktop.json`; the selected render endpoint
-is an optional compatible addition to that schema.
+Discovery, picker and inference children belong to kill-on-close Windows jobs.
+The UI never joins audio or GPU threads. Active settings are saved atomically to
+`%LOCALAPPDATA%\Clearwave\runtime\desktop.json`; the legacy render preference
+is ignored and cleared when capture devices are refreshed.
 
-Windows does not create, rename, or install a virtual audio driver. An existing
-virtual-cable playback endpoint can carry the processed stream to its paired
-recording endpoint. This distinction is exposed in the interface and documentation.
 Cross-compilation and compatibility-layer checks do not establish Windows device
 behavior, real-time deadlines, or waveform parity.
 

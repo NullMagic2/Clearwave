@@ -1,4 +1,4 @@
-# Build in an isolated temporary directory and retain only the executable output.
+# Build in an isolated temporary directory and retain only the executable and APO DLL output.
 [CmdletBinding()]
 param()
 $ErrorActionPreference = 'Stop'

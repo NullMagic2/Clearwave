@@ -21,5 +21,5 @@ fn main() {
             "-O", "coff", "-o"]).arg(&output).status()
     }.expect("Windows resource compiler unavailable; use a Visual Studio Developer shell or install MinGW windres");
     assert!(status.success(), "Windows resource compilation failed");
-    println!("cargo:rustc-link-arg={}", output.display());
+    println!("cargo:rustc-link-arg-bin=clearwave={}", output.display());
 }

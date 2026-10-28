@@ -1,0 +1,30 @@
+{
+  "version": "0.7.1-dev.6",
+  "stage": "unsigned Windows APO development preview",
+  "tests": {
+    "linux_shared_and_bridge_passed": 64,
+    "windows_wine_passed": 65,
+    "windows_preview_ignored": 1,
+    "setup_parser_and_recovery": "passed with in-memory registry",
+    "windows_clippy": "passed",
+    "linux_clippy": "passed",
+    "archive_contents": "passed",
+    "apo_exports": "passed",
+    "apo_embedded_manifest": false
+  },
+  "source_readme_unchanged": true,
+  "windows_playback_route_removed": true,
+  "virtual_microphone_created": false,
+  "capture_format": "48000 Hz float32 mono/stereo",
+  "fixed_latency_ms": 120,
+  "native_windows_audio_host_verified": false,
+  "signed_production_deployment": false,
+  "unverified": [
+    "Native Windows installation/uninstallation and OEM compatibility",
+    "Protected audiodg loading and signing",
+    "Real-time page residency and stress behavior",
+    "End-to-end processed capture on physical Windows hardware"
+  ],
+  "package": "clearwave-0.7.1-dev.6-windows-x86_64.zip",
+  "sha256": "11f43bc4c3a78f2f939a02b1c7b52af8adeb67f873f0690968958c66fceebf79"
+}

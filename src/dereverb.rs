@@ -1,7 +1,12 @@
 //! Optional single-channel late-reverberation reduction in the existing STFT.
 //! Delayed weighted prediction adapts on raw spectra, independently of slider mix.
 //! It has no playback reference and does not cancel speaker feedback or early echoes.
-use crate::{Result, audio::TRANSFORM, fft::Complex, network::GAINS};
+use crate::{
+    Result,
+    audio::{RATE, TRANSFORM},
+    fft::Complex,
+    network::GAINS,
+};
 use std::collections::VecDeque;
 
 const PREDICTION_DELAY: usize = 5;
@@ -12,6 +17,20 @@ const POWER_SMOOTHING: f32 = 0.9;
 const POWER_FLOOR: f32 = 1e-8;
 const MAX_COVARIANCE: f32 = 1e6;
 const MAX_SUBTRACTION: f32 = 0.7;
+const ATTENUATION_SMOOTHING: f32 = 0.75;
+const NEIGHBOUR_WEIGHT: f32 = 0.25;
+const CENTRE_WEIGHT: f32 = 0.5;
+const PROTECTED_VOICE_HZ: f32 = 250.0;
+const FULL_CANCELLATION_HZ: f32 = 600.0;
+const LOW_VOICE_CANCELLATION: f32 = 0.25;
+
+fn cancellation_weight(bin: usize) -> f32 {
+    let frequency = bin as f32 * RATE as f32 / TRANSFORM as f32;
+    let transition = ((frequency - PROTECTED_VOICE_HZ)
+        / (FULL_CANCELLATION_HZ - PROTECTED_VOICE_HZ))
+        .clamp(0.0, 1.0);
+    LOW_VOICE_CANCELLATION + (1.0 - LOW_VOICE_CANCELLATION) * transition
+}
 
 #[derive(Default)]
 pub struct EchoReducer {
@@ -26,6 +45,7 @@ struct Bin {
     weights: [Complex; PREDICTION_TAPS],
     inverse: [[Complex; PREDICTION_TAPS]; PREDICTION_TAPS],
     power: f32,
+    attenuation: f32,
 }
 impl Default for Bin {
     fn default() -> Self {
@@ -37,6 +57,7 @@ impl Default for Bin {
             weights: [Complex::default(); PREDICTION_TAPS],
             inverse,
             power: 0.0,
+            attenuation: 0.0,
         }
     }
 }
@@ -60,6 +81,7 @@ impl EchoReducer {
         };
         debug_assert_eq!(spectrum.len(), TRANSFORM);
         let raw = spectrum[..GAINS].to_vec();
+        let mut targets = vec![0.0; GAINS];
         for (frequency, bin) in state.bins.iter_mut().enumerate() {
             let observed = raw[frequency];
             bin.power = POWER_SMOOTHING * bin.power + (1.0 - POWER_SMOOTHING) * observed.power();
@@ -71,20 +93,32 @@ impl EchoReducer {
             });
             let predicted = bin.predict_and_adapt(observed, &taps);
 
-            // Bound cancellation and prohibit per-bin gain to limit audible damage.
-            // The delayed predictor still can mistake sustained speech for reflections.
-            // This safeguard is conservative, not a speech-preservation guarantee.
-            let limit = MAX_SUBTRACTION * observed.power().sqrt();
+            let observed_magnitude = observed.power().sqrt();
+            if observed_magnitude == 0.0 {
+                continue;
+            }
+            let limit = MAX_SUBTRACTION * observed_magnitude;
             let magnitude = predicted.power().sqrt();
             let mix = if magnitude > limit {
                 limit / magnitude
             } else {
                 1.0
-            } * self.amount;
-            let mut reduced = observed.subtract(predicted.scale(mix));
-            if reduced.power() > observed.power() {
-                reduced = reduced.scale((observed.power() / reduced.power()).sqrt());
-            }
+            };
+            let residual = observed.subtract(predicted.scale(mix)).power().sqrt();
+            targets[frequency] = (1.0 - residual / observed_magnitude).clamp(0.0, MAX_SUBTRACTION);
+        }
+        for (frequency, bin) in state.bins.iter_mut().enumerate() {
+            let left = targets[frequency.saturating_sub(1)];
+            let right = targets[(frequency + 1).min(GAINS - 1)];
+            let target = CENTRE_WEIGHT * targets[frequency] + NEIGHBOUR_WEIGHT * (left + right);
+            bin.attenuation =
+                ATTENUATION_SMOOTHING * bin.attenuation + (1.0 - ATTENUATION_SMOOTHING) * target;
+
+            // Convert the prediction into a smooth, attenuation-only mask.
+            // Keep input phase: complex subtraction can rotate quiet noise bins
+            // and create inconsistent phase across overlapping transform frames.
+            let gain = 1.0 - self.amount * cancellation_weight(frequency) * bin.attenuation;
+            let reduced = raw[frequency].scale(gain);
             spectrum[frequency] = reduced;
             if frequency > 0 && frequency < TRANSFORM / 2 {
                 spectrum[TRANSFORM - frequency] = reduced.conjugate();
@@ -156,6 +190,57 @@ impl Bin {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn echo_preserves_phase_and_never_amplifies_observed_bins() {
+        const FRAMES: usize = 150;
+        const TEST_BIN: usize = 40;
+        const PHASE_STEP: f32 = 0.37;
+        let mut echo = EchoReducer::default();
+        echo.set_amount(1.0).unwrap();
+
+        for frame in 0..FRAMES {
+            let phase = (frame * frame) as f32 * PHASE_STEP;
+            let mut spectrum = vec![Complex::default(); TRANSFORM];
+            let observed = Complex {
+                re: phase.cos(),
+                im: phase.sin(),
+            };
+            spectrum[TEST_BIN] = observed;
+            spectrum[TRANSFORM - TEST_BIN] = observed.conjugate();
+            echo.process(&mut spectrum);
+
+            let product = spectrum[TEST_BIN].multiply(observed.conjugate());
+            assert!(
+                product.im.abs() < 1e-6,
+                "phase rotation at frame {frame}: {}",
+                product.im
+            );
+            assert!(product.re >= 0.0);
+            assert!(spectrum[TEST_BIN].power() <= observed.power() + 1e-6);
+        }
+    }
+
+    #[test]
+    fn sustained_low_voice_is_protected_when_the_predictor_learns_its_harmonics() {
+        const LOW_BIN: usize = 7;
+        const HIGH_BIN: usize = 40;
+        const FRAMES: usize = 300;
+        let mut echo = EchoReducer::default();
+        echo.set_amount(1.0).unwrap();
+        let mut spectrum = vec![Complex::default(); TRANSFORM];
+        for _ in 0..FRAMES {
+            spectrum.fill(Complex::default());
+            for bin in [LOW_BIN, HIGH_BIN] {
+                spectrum[bin].re = 1.0;
+                spectrum[TRANSFORM - bin].re = 1.0;
+            }
+            echo.process(&mut spectrum);
+            assert!(spectrum[LOW_BIN].re >= 0.825 - f32::EPSILON);
+            assert_eq!(spectrum[LOW_BIN].re, spectrum[TRANSFORM - LOW_BIN].re);
+        }
+        assert!(spectrum[LOW_BIN].re > spectrum[HIGH_BIN].re);
+    }
+
     #[test]
     fn slider_mix_changes_cancellation_and_off_discards_adaptation() {
         let mut half = EchoReducer::default();
