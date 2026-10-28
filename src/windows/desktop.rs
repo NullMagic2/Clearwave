@@ -1472,6 +1472,29 @@ mod tests {
     use ::windows::Win32::System::Threading::{GR_GDIOBJECTS, GetCurrentProcess, GetGuiResources};
     const RESOURCE_CHECK_CYCLES: usize = 8;
     const MAX_RETAINED_GDI_OBJECTS: u32 = 4;
+    const TEST_MESSAGE_TIMEOUT: Duration = Duration::from_secs(2);
+
+    fn take_quit_message() -> bool {
+        let deadline = Instant::now() + TEST_MESSAGE_TIMEOUT;
+        // SAFETY: the fixture owns this thread's native windows and message queue.
+        // WM_QUIT is generated at low priority after pending messages are drained.
+        // Dispatch completes native painting/cleanup before checking the quit flag.
+        unsafe {
+            let mut message = MSG::default();
+            while Instant::now() < deadline {
+                if PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
+                    if message.message == WM_QUIT {
+                        return true;
+                    }
+                    let _ = TranslateMessage(&message);
+                    DispatchMessageW(&message);
+                } else {
+                    std::thread::yield_now();
+                }
+            }
+        }
+        false
+    }
 
     struct SettingsDirectory(PathBuf);
     impl SettingsDirectory {
@@ -1528,8 +1551,7 @@ mod tests {
         unsafe {
             assert!(IsWindow(Some(main)).as_bool());
             assert!(IsWindow(Some(settings)).as_bool());
-            let mut quit = MSG::default();
-            assert!(PeekMessageW(&mut quit, None, WM_QUIT, WM_QUIT, PM_REMOVE).as_bool());
+            assert!(take_quit_message());
             let expected = [LANGUAGE, SOURCE, REFRESH, OUTPUT, STRENGTH, SETTINGS, START];
             let mut previous = None;
             for id in expected {
