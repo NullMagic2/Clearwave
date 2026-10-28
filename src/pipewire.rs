@@ -270,7 +270,7 @@ pub fn live(bundle: &Path, selector: &str, options: LiveOptions) -> Result<()> {
     }
     let source = select_source(available, selector)?;
     if let Some(path) = &options.control_file {
-        crate::controls::StrengthControl::read(path)?;
+        crate::controls::ProcessingControl::read(path)?;
     }
     let signals = StopSignals::new()?;
     let mut children = Children(Vec::new());

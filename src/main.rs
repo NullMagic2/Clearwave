@@ -2,7 +2,11 @@
 //! Shared loading and processing paths serve both Linux and Windows interfaces.
 #![cfg_attr(all(windows, feature = "windows-gui"), windows_subsystem = "windows")]
 mod audio;
+mod broadcast;
+mod broadcast_import;
+mod conditioning;
 mod controls;
+mod dereverb;
 #[cfg(target_os = "linux")]
 mod desktop;
 mod export;
@@ -87,9 +91,9 @@ Commands:
   operator-check BUNDLE_DIRECTORY [ADAPTER_NAME_SUBSTRING]
   infer-features BUNDLE_DIRECTORY INPUT.f32 NEW_OUTPUT.f32 [ADAPTER_NAME_SUBSTRING]
   infer-features-cpu BUNDLE_DIRECTORY INPUT.f32 NEW_OUTPUT.f32
-  wav-features INPUT.wav NEW_FEATURES.f32
-  denoise BUNDLE_DIRECTORY INPUT.wav NEW_OUTPUT.wav [STRENGTH] [ADAPTER_NAME_SUBSTRING]
-  denoise-cpu BUNDLE_DIRECTORY INPUT.wav NEW_OUTPUT.wav [STRENGTH]
+  wav-features INPUT.wav NEW_FEATURES.f32 [BUNDLE_DIRECTORY]
+  denoise BUNDLE_DIRECTORY INPUT.wav NEW_OUTPUT.wav [STRENGTH] [ADAPTER_NAME_SUBSTRING] [ECHO_REDUCTION]
+  denoise-cpu BUNDLE_DIRECTORY INPUT.wav NEW_OUTPUT.wav [STRENGTH] [ECHO_REDUCTION]
   audio-bypass INPUT.wav NEW_OUTPUT.wav
   stream BUNDLE_DIRECTORY [STRENGTH] [ADAPTER_NAME_SUBSTRING]
   stream-cpu BUNDLE_DIRECTORY [STRENGTH]
@@ -103,6 +107,9 @@ Model locations accept a .safetensors file directly, or a folder containing
 voice-weights.safetensors or model.safetensors. This mode needs no NVIDIA DLL.
 Original 0.5.12.6 packages remain supported: denoiser_48k.wpkg and NVAudioEffects.dll
 may be together in the selected folder, or under NvAFX/models and NvAFX/nv.
+Broadcast 2.3 folders accept denoiser_48k.trtpkg and nvafxdenoiser.dll together.
+Installer import supports RTX Voice 0.5.12.6 and Broadcast 2.3.0.71988672.
+Broadcast import may download about 33 MB from NVIDIA if no local model cache exists.
 GPU checks execute isolated real weight matrices and compare against CPU f64.
 Feature inference reads 320 little-endian F32 values per frame and writes 961 raw mask values.
 WAV commands accept 48000 Hz PCM16/24/32 or float32 mono/stereo input.
@@ -204,7 +211,7 @@ fn run(args: Vec<PathBuf>) -> Result<()> {
         ("live" | "make-default-mic", _) => Err(Error::new(
             "PipeWire commands are Linux-only. Use the Windows interface to select a microphone and processed-audio output.",
         )),
-        ("wav-features", 3) => wav_features(&args[1], &args[2]),
+        ("wav-features", 3..=4) => wav_features(&args[1], &args[2], args.get(3)),
         ("audio-bypass", 3) => {
             require_new_output(&args[2])?;
             let input = wav::read(&args[1])?;
@@ -219,7 +226,7 @@ fn run(args: Vec<PathBuf>) -> Result<()> {
             );
             Ok(())
         }
-        ("denoise", 4..=6) | ("denoise-cpu", 4..=5) => denoise(&args, cmd == "denoise-cpu"),
+        ("denoise", 4..=7) | ("denoise-cpu", 4..=6) => denoise(&args, cmd == "denoise-cpu"),
         ("stream", 2..=4) | ("stream-cpu", 2..=3) => stream_audio(&args, cmd == "stream-cpu"),
         ("inspect", 2) => {
             let m = load(&args[1])?;
@@ -304,7 +311,7 @@ fn require_new_output(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn wav_features(input: &Path, output: &Path) -> Result<()> {
+fn wav_features(input: &Path, output: &Path, model: Option<&PathBuf>) -> Result<()> {
     use std::io::Write;
 
     require_new_output(output)?;
@@ -315,7 +322,11 @@ fn wav_features(input: &Path, output: &Path) -> Result<()> {
             .create_new(true)
             .open(output)?,
     );
-    let frames = audio::Processor::new()?.features(&input.samples, |values| {
+    let profile = model
+        .map(|path| load(path).map(|model| model.profile))
+        .transpose()?
+        .unwrap_or_default();
+    let frames = audio::Processor::for_profile(profile)?.features(&input.samples, |values| {
         for value in values {
             out.write_all(&value.to_le_bytes())?;
         }
@@ -335,6 +346,10 @@ fn denoise(args: &[PathBuf], cpu: bool) -> Result<()> {
     require_new_output(&args[3])?;
 
     let strength = processing_strength(args.get(4))?;
+    let echo_reduction = match args.get(if cpu { 5 } else { 6 }) {
+        Some(value) => processing_strength(Some(value))?,
+        None => 0.0,
+    };
     let input = wav::read(&args[2])?;
     let model = load(&args[1])?;
     let backend = if cpu {
@@ -344,9 +359,12 @@ fn denoise(args: &[PathBuf], cpu: bool) -> Result<()> {
     };
 
     let mut network = network::Network::new(&model, backend)?;
-    let processor = audio::Processor::new()?;
+    let processor = audio::Processor::for_profile(model.profile)?;
     let start = std::time::Instant::now();
-    let output = processor.process(&input.samples, strength, |context| network.step(context))?;
+    let output =
+        processor.process_with_echo(&input.samples, strength, echo_reduction, |context| {
+            network.step(context)
+        })?;
     let elapsed = start.elapsed().as_secs_f64();
     wav::write_new(&args[3], &output)?;
     let rms =
@@ -355,7 +373,7 @@ fn denoise(args: &[PathBuf], cpu: bool) -> Result<()> {
         "{}",
         serde_json::to_string_pretty(&json!({
             "sample_rate":audio::RATE,"samples":output.len(),"input_channels":input.channels,"output_channels":1,
-            "frames":network.steps(),"initial_context_predictions":network.steps().min(audio::CONTEXT_RADIUS),"adapter":network.backend.name(),"strength":strength,
+            "frames":network.steps(),"initial_context_predictions":network.steps().min(audio::lookahead_hops(model.profile)),"adapter":network.backend.name(),"strength":strength,"echo_reduction":echo_reduction,
             "execution_mode":network.execution_mode(),"resident_parameter_bytes":network.resident_parameter_bytes(),
             "audio_seconds":output.len() as f64 / audio::RATE as f64,"elapsed_ms":elapsed*1000.0,
             "processing_seconds_per_audio_second":elapsed / (output.len() as f64 / audio::RATE as f64),
@@ -392,10 +410,10 @@ fn stream_audio(args: &[PathBuf], cpu: bool) -> Result<()> {
     };
 
     let mut network = network::Network::new(&model, backend)?;
-    let mut processor = audio::StreamProcessor::new()?;
+    let mut processor = audio::StreamProcessor::new(model.profile)?;
     eprintln!(
         "{}",
-        json!({"event":"stream_ready","adapter":network.backend.name(),"algorithmic_delay_samples":audio::ALGORITHMIC_DELAY_SAMPLES,"sample_rate":audio::RATE})
+        json!({"event":"stream_ready","adapter":network.backend.name(),"algorithmic_delay_samples":audio::algorithmic_delay_samples(model.profile),"sample_rate":audio::RATE})
     );
 
     let mut reader = std::io::stdin().lock();
@@ -434,8 +452,11 @@ fn stream_audio(args: &[PathBuf], cpu: bool) -> Result<()> {
         if hops.is_multiple_of(STREAM_CONTROL_INTERVAL_HOPS)
             && let Some(path) = &control
         {
-            match controls::StrengthControl::read(path) {
-                Ok(next) => strength = next,
+            match controls::ProcessingControl::read(path) {
+                Ok(next) => {
+                    strength = next.strength;
+                    processor.set_echo_reduction(next.echo_reduction)?;
+                }
                 Err(e) => eprintln!(
                     "{}",
                     json!({"event":"control_error","message":e.to_string()})
@@ -468,7 +489,7 @@ fn stream_audio(args: &[PathBuf], cpu: bool) -> Result<()> {
     eprintln!(
         "{}",
         serde_json::to_string(
-            &json!({"event":"stream_finished","samples":processor.samples(),"frames":network.steps(),"initial_context_predictions":network.steps().min(audio::CONTEXT_RADIUS),"adapter":network.backend.name(),"execution_mode":network.execution_mode(),"resident_parameter_bytes":network.resident_parameter_bytes(),"algorithmic_delay_samples":audio::ALGORITHMIC_DELAY_SAMPLES,"sample_rate":audio::RATE,"wall_elapsed_ms":start.elapsed().as_secs_f64()*1000.0,"scope":"bounded raw float32 stream; wall time includes input/output waits; PipeWire routing is not created"})
+            &json!({"event":"stream_finished","samples":processor.samples(),"frames":network.steps(),"initial_context_predictions":network.steps().min(audio::lookahead_hops(model.profile)),"adapter":network.backend.name(),"execution_mode":network.execution_mode(),"resident_parameter_bytes":network.resident_parameter_bytes(),"algorithmic_delay_samples":audio::algorithmic_delay_samples(model.profile),"sample_rate":audio::RATE,"wall_elapsed_ms":start.elapsed().as_secs_f64()*1000.0,"scope":"bounded raw float32 stream; wall time includes input/output waits; PipeWire routing is not created"})
         )?
     );
     Ok(())

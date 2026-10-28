@@ -51,10 +51,14 @@ def main():
         install(binary, root/'clearwave.exe', 0o755)
         for source, destination in [
             ('README.md', 'README.md'),
+            ('docs/linux-frontend.png', 'docs/linux-frontend.png'),
+            ('docs/BROADCAST_MODEL.md', 'docs/BROADCAST_MODEL.md'),
+            ('docs/broadcast-comparison.json', 'docs/broadcast-comparison.json'),
             ('LICENSE', 'LICENSE'),
             ('Cargo.lock', 'Cargo.lock'),
             ('packaging/windows/BUILDING.md', 'WINDOWS.md'),
             ('docs/WINDOWS_LIFECYCLE.md', 'WINDOWS-MAINTENANCE.md'),
+            ('docs/ECHO_REDUCTION.md', 'ECHO_REDUCTION.md'),
             ('ui/flags/LICENSE', 'flag-icons-LICENSE'),
             ('ui/flags/SOURCE.json', 'flag-icons-SOURCE.json'),
         ]:

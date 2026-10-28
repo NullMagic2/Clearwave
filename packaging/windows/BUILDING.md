@@ -75,7 +75,10 @@ waiting for a stuck dialog or GPU call on the message thread.
 
 ## Importing the model
 
-Use **Installer…** in Settings to select the RTX Voice 0.5.12.6 setup executable.
+Use **Installer…** in Settings to select the RTX Voice 0.5.12.6 or NVIDIA
+Broadcast 2.3.0.71988672 setup executable. Broadcast import reuses a local model
+cache or downloads approximately 33 MB from NVIDIA with Windows curl. It fetches
+only model and decoder data, without CUDA or TensorRT runtime dependencies.
 Install 7-Zip first; Clearwave detects `7z` on PATH or a standard Windows 7-Zip
 installation. Extraction, graph validation, and weight export run in the owned
 helper process. **Cancel** or closing Clearwave terminates that helper and its

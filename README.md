@@ -1,6 +1,12 @@
 # Clearwave
 
-**Experimental: speech quality and RTX Voice equivalence remain unverified.**
+**Experimental: native NVIDIA hardware equivalence and live-device latency remain unverified.**
+
+Version **0.7.1-dev.4** corrects Broadcast 2.3's analysis window, causal feature
+and spectrum alignment, nonlinear strength curve, and quiet-input conditioning.
+Fourteen comparisons against the NVIDIA audio runtime on AMD pass the recorded
+acceptance criteria. The remaining voice-band level difference is below 0.008 dB
+in those cases. See [Broadcast comparison results](docs/BROADCAST_MODEL.md).
 Version 0.6.6 corrected an output-projection layout error in earlier builds that
 could suppress speech. Controlled comparisons with generated speech and two
 natural speech references improve after the correction. Muffled speech and
@@ -10,14 +16,14 @@ alone is not a speech-quality result.
 Version 0.7.0 completes the supported feature graph mapping and
 adds a native Windows interface with WASAPI audio. All 14 processing stages and
 32 tensor layouts are explicit; reference input-level conditioning and vendor
-output parity remain separate work. The waveform adapter now retains three initial
+output parity remain separate work. The legacy waveform adapter now retains three initial
 recurrent-state updates that earlier builds skipped; this corrects startup
 sequencing, with mixed measured speech-quality changes. See
 [graph evidence](docs/MODEL_GRAPH.md) and [audio alignment](docs/AUDIO_ALIGNMENT.md).
 
 ## What is Clearwave?
 
-Clearwave is an experimental effort to run the RTX Voice model on AMD-based Linux and Windows systems and reduce microphone background noise in recordings and calls.
+Clearwave is an experimental effort to run RTX Voice and Broadcast audio models on AMD-based Linux and Windows systems and reduce microphone background noise in recordings and calls.
 It processes audio locally using your AMD graphics card and provides a virtual microphone on Linux. On Windows, it sends processed audio to an output you choose; an installed virtual audio cable can expose that audio to your other apps.
 
 ## Why was it created?
@@ -28,9 +34,12 @@ Clearwave was created to bring the same model to AMD-based systems, without requ
 ## Model files
 
 For legal reasons, NVIDIA model files are not distributed with Clearwave.
-They can be obtained by obtaining **NVIDIA RTX Voice** separately; see
+Obtain **NVIDIA RTX Voice** or **NVIDIA Broadcast** separately to supply them; see
 [NVIDIA’s RTX Voice setup and download guide](https://www.nvidia.com/en-us/geforce/guides/nvidia-rtx-voice-setup-guide/).
-Clearwave currently supports the model bundle from RTX Voice **0.5.12.6**. Once exported, the weights run directly in Clearwave’s Rust/WGSL engine; no NVIDIA DLL is needed for normal use.
+Clearwave supports RTX Voice **0.5.12.6** and the pinned noise-removal model used by
+NVIDIA Broadcast **2.3.0.71988672**. Once exported, the weights run directly in
+Clearwave’s Rust/WGSL engine; no NVIDIA DLL is needed for normal use. Broadcast
+output agreement remains under validation; see [Broadcast model support](docs/BROADCAST_MODEL.md).
 The installer, model packages, NVIDIA DLLs, and exported weights are excluded
 from this repository and its releases. NVIDIA’s files remain subject to NVIDIA’s
 license; Clearwave’s MIT license does not apply to them.
@@ -43,6 +52,10 @@ notices. Flag artwork attribution is in [ui/flags/LICENSE](ui/flags/LICENSE);
 binary packages also include Rust dependency notices.
 
 ## Linux desktop interface
+
+![Clearwave Linux frontend with a generic USB microphone](docs/linux-frontend.png)
+
+*The GTK3 interface with a dummy microphone selection; no personal devices are shown.*
 
 ```sh
 ./bin/clearwave
@@ -134,12 +147,21 @@ different Cargo executable. Default output is a native Linux executable.
 
 ## Load the supplied model
 
-In **Settings**, click **Installer…** and select your locally downloaded NVIDIA
-RTX Voice **0.5.12.6** setup executable. Clearwave extracts the supported bundle,
-validates its graph, and exports reusable weights in the background. It saves
-the resulting model folder automatically. **Cancel** stops the selection/import.
-The installer is read as an archive and is never run; 7-Zip must be installed
-(`7z` on PATH, or the usual 7-Zip installation on Windows).
+In **Settings**, click **Installer…** and select either locally downloaded setup executable:
+
+- NVIDIA RTX Voice **0.5.12.6**: its model bundle is extracted from the installer.
+- NVIDIA Broadcast **2.3.0.71988672**: Clearwave reads the installer and looks for
+  the supported audio files beside it, in a `Models` subfolder, or in NVIDIA’s
+  local NGX model cache. If unavailable, it downloads about **33 MB** from NVIDIA.
+  The Broadcast EXE itself does not contain its audio model.
+
+Clearwave validates the files and graph, exports reusable weights in the background,
+and saves the resulting model folder automatically. **Cancel** stops the selection
+or import. The installer is read as an archive and is never run; install 7-Zip
+(`7z` on PATH, or the usual Windows installation). The Broadcast download also
+requires `curl` on Linux; supported Windows systems supply `curl.exe`.
+Only the model and decoder data are retrieved; CUDA, TensorRT, cuBLAS, and FFT
+libraries are not required by Clearwave.
 
 Imported files stay locally under `runtime/imported-models/<installer SHA-256>`
 using the application's runtime directory described above. Selecting the same
@@ -168,6 +190,9 @@ Models/
 ├── denoiser_48k.wpkg
 └── NVAudioEffects.dll
 ```
+
+For Broadcast, place `denoiser_48k.trtpkg` and `nvafxdenoiser.dll` together
+at the root instead. Both package loaders read the DLL as data without executing it.
 
 The original `NvAFX/models/denoiser_48k.wpkg` and
 `NvAFX/nv/NVAudioEffects.dll` layout remains supported. Exported weights take
@@ -277,7 +302,8 @@ and clicks, runs full-strength processing, and reports voice level, SI-SDR, and
 noise after speech ends. Comparison audio stays in the specified local directory.
 See [the correction and measurement notes](docs/OUTPUT_PROJECTION.md).
 
-`wav-features` uses a periodic Hamming window, a 1,920-sample FFT, 480-sample hop,
+`wav-features` defaults to the legacy periodic Hamming window; its optional model
+argument selects Broadcast’s periodic Hann window. Both use a 1,920-sample FFT, 480-sample hop,
 and 320 area-normalized Slaney mel bands. Mel power is clipped between −40 and
 48 dB and mapped to 0–1. Frame zero begins at sample −1,440; three tail frames
 complete the overlap. Features outside the sequence are zero. Output is aligned
@@ -310,3 +336,11 @@ Requires PipeWire/WirePlumber tools (`pw-dump`, `pw-loopback`, `pw-record`,
 ```
 
 Choose the exact source name, current object ID, or serial listed by `sources`.
+
+### Optional echo reduction
+
+The main window has an experimental **Echo reduction** slider below noise removal (0–100%). Leave it at 0%
+to keep it off, or increase it gradually to reduce late room reflections. The
+selection is saved and can change during processing. Higher values may alter
+speech; this does not cancel speaker feedback. See
+[echo reduction](docs/ECHO_REDUCTION.md) for behavior and offline comparisons.

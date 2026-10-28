@@ -64,6 +64,8 @@ pub struct AudioSettings {
     pub adapter: String,
     pub render: String,
     pub strength: f32,
+    #[serde(default)]
+    pub echo_reduction: f32,
     pub latency_ms: u16,
 }
 impl Default for AudioSettings {
@@ -74,6 +76,7 @@ impl Default for AudioSettings {
             adapter: String::new(),
             render: String::new(),
             strength: 1.0,
+            echo_reduction: 0.0,
             latency_ms: DEFAULT_LATENCY_MS,
         }
     }
@@ -81,6 +84,7 @@ impl Default for AudioSettings {
 impl AudioSettings {
     pub fn validate(&self) -> Result<()> {
         crate::audio::validate_strength(self.strength)?;
+        crate::audio::validate_strength(self.echo_reduction)?;
         if !(MIN_LATENCY_MS..=MAX_LATENCY_MS).contains(&self.latency_ms)
             || [&self.bundle, &self.source, &self.adapter, &self.render]
                 .iter()
@@ -228,18 +232,28 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct StrengthControl {
+pub struct ProcessingControl {
     pub strength: f32,
+    #[serde(default)]
+    pub echo_reduction: f32,
 }
-impl StrengthControl {
-    pub fn read(path: &Path) -> Result<f32> {
+impl ProcessingControl {
+    pub fn read(path: &Path) -> Result<Self> {
         let control: Self = serde_json::from_slice(&bounded_read(path, MAX_CONTROL_BYTES)?)?;
-        crate::audio::validate_strength(control.strength)?;
-        Ok(control.strength)
+        control.validate()?;
+        Ok(control)
     }
-    pub fn write(path: &Path, strength: f32) -> Result<()> {
-        crate::audio::validate_strength(strength)?;
-        atomic_write(path, &serde_json::to_vec(&Self { strength })?)
+    fn validate(&self) -> Result<()> {
+        crate::audio::validate_strength(self.strength)?;
+        crate::audio::validate_strength(self.echo_reduction)
+    }
+    pub fn write(path: &Path, settings: &AudioSettings) -> Result<()> {
+        let control = Self {
+            strength: settings.strength,
+            echo_reduction: settings.echo_reduction,
+        };
+        control.validate()?;
+        atomic_write(path, &serde_json::to_vec(&control)?)
     }
 }
 #[derive(Default)]
@@ -328,6 +342,8 @@ mod tests {
         assert_eq!(p.active.adapter, "AMD");
         assert_eq!(p.active.latency_ms, 20);
         assert_eq!(p.active.strength, 0.4);
+        assert_eq!(p.active.echo_reduction, 0.0);
+        p.active.echo_reduction = 0.37;
         assert_eq!(p.language, crate::i18n::Language::PortugueseBrazil);
         let saved = serde_json::to_value(&p).unwrap();
         assert!(saved.get("presets").is_none());
@@ -345,9 +361,33 @@ mod tests {
         assert_eq!(l.take(), (0.0, 0.0));
     }
     #[test]
+    fn processing_controls_round_trip_and_reject_invalid_echo_values() {
+        let path =
+            std::env::temp_dir().join(format!("clearwave-control-{}.json", std::process::id()));
+        let settings = AudioSettings {
+            strength: 0.45,
+            echo_reduction: 0.63,
+            ..AudioSettings::default()
+        };
+        ProcessingControl::write(&path, &settings).unwrap();
+        let decoded = ProcessingControl::read(&path).unwrap();
+        assert_eq!(decoded.strength, settings.strength);
+        assert_eq!(decoded.echo_reduction, settings.echo_reduction);
+        std::fs::write(&path, br#"{"strength":0.5}"#).unwrap();
+        assert_eq!(ProcessingControl::read(&path).unwrap().echo_reduction, 0.0);
+        for payload in [
+            br#"{"strength":0.5,"echo_reduction":-0.1}"#.as_slice(),
+            br#"{"strength":0.5,"echo_reduction":1.1}"#,
+        ] {
+            std::fs::write(&path, payload).unwrap();
+            assert!(ProcessingControl::read(&path).is_err());
+        }
+        std::fs::remove_file(path).unwrap();
+    }
+    #[test]
     fn control_requires_finite_bounded_strength() {
         for payload in [r#"{"strength":1.5}"#, r#"{"strength":0.5,"unexpected":1}"#] {
-            let parsed = serde_json::from_str::<StrengthControl>(payload);
+            let parsed = serde_json::from_str::<ProcessingControl>(payload);
             assert!(
                 parsed.is_err()
                     || crate::audio::validate_strength(parsed.unwrap().strength).is_err()

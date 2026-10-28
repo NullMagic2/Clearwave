@@ -5,7 +5,7 @@
 use crate::{
     Error, Result,
     audio::{HOP, RATE, StreamProcessor},
-    controls::{Levels, StrengthControl},
+    controls::{Levels, ProcessingControl},
     network::{Backend, CONTEXT, Network},
 };
 use cpal::{
@@ -202,7 +202,7 @@ where
 }
 
 /// Process one explicit microphone and one explicit render endpoint.
-/// The desktop owns this internal command's job and atomic strength file.
+/// The desktop owns this internal command's job and atomic processing-control file.
 /// Failure ends this stream without selecting another device or changing defaults.
 pub fn run(args: &[PathBuf]) -> Result<()> {
     if args.len() != 5 {
@@ -233,8 +233,9 @@ pub fn run(args: &[PathBuf]) -> Result<()> {
         &model,
         Backend::amd((!selector.is_empty()).then_some(selector))?,
     )?;
-    let mut processor = StreamProcessor::new()?;
-    let mut strength = StrengthControl::read(&args[3])?;
+    let mut processor = StreamProcessor::new(model.profile)?;
+    let mut control = ProcessingControl::read(&args[3])?;
+    processor.set_echo_reduction(control.echo_reduction)?;
     let (capture_send, capture_recv) = mpsc::sync_channel(AUDIO_QUEUE_BLOCKS);
     let (render_send, render_recv) = mpsc::sync_channel(AUDIO_QUEUE_BLOCKS);
     let failed = Arc::new(AtomicBool::new(false));
@@ -302,10 +303,11 @@ pub fn run(args: &[PathBuf]) -> Result<()> {
         pending.extend(block);
         while pending.len() >= HOP {
             if hops.is_multiple_of(CONTROL_INTERVAL_HOPS) {
-                strength = StrengthControl::read(&args[3])?;
+                control = ProcessingControl::read(&args[3])?;
+                processor.set_echo_reduction(control.echo_reduction)?;
             }
             let hop: Vec<_> = pending.drain(..HOP).collect();
-            let processed = processor.push(&hop, strength, &mut |c| network.step(c))?;
+            let processed = processor.push(&hop, control.strength, &mut |c| network.step(c))?;
             levels.add(&processed);
             if !processed.is_empty() {
                 render_send
