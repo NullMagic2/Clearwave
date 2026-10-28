@@ -9,17 +9,17 @@
     {
       "filename": "clearwave_0.7.1-dev.4-1+debian13_amd64.deb",
       "target": "Debian 13",
-      "sha256": "f390cc258609170ffff48729e3e2ffcf05ae90a191fed91b7bd9d60d3fef082b"
+      "sha256": "27d1ea37752a25f379fdb225b5ffb8261b0b2047e99c01f66768a59537742497"
     },
     {
       "filename": "clearwave_0.7.1-dev.4-1+ubuntu24.04_amd64.deb",
       "target": "Ubuntu 24.04 LTS and newer",
-      "sha256": "8280d63a78cd72d6d03f045f0caf0dba53f74339388124e2381930314c2887e7"
+      "sha256": "110365966ef18be7e86d0c30507a3c50ba7db8e2212d8a1c6744456d07178a4f"
     },
     {
       "filename": "clearwave_0.7.1-dev.4-1+mint22_amd64.deb",
       "target": "Linux Mint 22.x",
-      "sha256": "672f3afca9090615e74d59996dbac5ab60122c657b458e05184c4dacf799d46b"
+      "sha256": "9f14000afe4a2a1973b54768ce3ff0402aaf321e0517df4fd8158d231948ff10"
     }
   ]
 }
